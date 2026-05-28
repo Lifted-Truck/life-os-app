@@ -32,6 +32,15 @@ def append_to_file(relative_path: str, content: str) -> None:
         f.write(content)
 
 
+def get_domain_path(domain_name: str) -> Path:
+    """Return the path to a domain folder under domains/.
+
+    All nine domain folders moved from the Life-OS root into domains/ on 2026-05-28.
+    Always use this helper rather than constructing domain paths manually.
+    """
+    return get_life_os_root() / "domains" / domain_name
+
+
 def read_thresholds() -> dict:
     return yaml.safe_load(read_file("thresholds.yaml"))
 
