@@ -1,5 +1,5 @@
 import os
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import yaml
@@ -47,6 +47,52 @@ def read_thresholds() -> dict:
 
 def today_log_path() -> Path:
     return get_life_os_root() / "daily" / "logs" / f"{date.today().isoformat()}.md"
+
+
+def update_threshold(domain: str, field: str, value: float) -> None:
+    """Update a single numeric field in thresholds.yaml, preserving comments."""
+    content = read_file("thresholds.yaml")
+    lines = content.splitlines()
+    in_domain = False
+    result = []
+    updated = False
+    for line in lines:
+        stripped = line.strip()
+        if not line.startswith(" ") and stripped == f"{domain}:":
+            in_domain = True
+        elif in_domain and line and not line.startswith(" ") and not line.startswith("#"):
+            in_domain = False
+        if in_domain and stripped.startswith(f"{field}:"):
+            indent = len(line) - len(line.lstrip())
+            result.append(" " * indent + f"{field}: {value}")
+            updated = True
+        else:
+            result.append(line)
+    if not updated:
+        raise ValueError(f"Field '{domain}.{field}' not found in thresholds.yaml")
+    write_file("thresholds.yaml", "\n".join(result) + "\n")
+
+
+def append_inbox(task_text: str) -> None:
+    """Append a task line to inbox.md."""
+    append_to_file("inbox.md", f"- [ ] {task_text}\n")
+
+
+def write_ingest_note(domain: str, body: str) -> str:
+    """Write a bot-generated note to ingest/. Returns the filename created."""
+    now = datetime.now()
+    filename = now.strftime("%Y-%m-%d-%H-%M") + ".md"
+    domain_line = domain if domain else ""
+    content = (
+        f"source: telegram\n"
+        f"date: {now.strftime('%Y-%m-%d')}\n"
+        f"time: {now.strftime('%H:%M')}\n"
+        f"domain: {domain_line}\n"
+        f"---\n"
+        f"{body}\n"
+    )
+    write_file(f"ingest/{filename}", content)
+    return filename
 
 
 def append_log_entry(entry: dict) -> None:
