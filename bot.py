@@ -159,17 +159,17 @@ async def cmd_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(
             "Usage:\n"
             "  /note [domain] <text>   — tag optional, must match a domain name\n"
-            "  /note --ai <text>       — let Haiku extract domain and clean text\n"
+            "  /note ai <text>         — let Haiku extract domain and clean text\n"
             "  /note list              — same as /domain list"
         )
         return
 
     known_domains = set(read_thresholds().keys())
 
-    if args[0] == "--ai":
+    if args[0] == "ai":
         text = " ".join(args[1:])
         if not text:
-            await update.message.reply_text("Provide text after --ai.")
+            await update.message.reply_text("Provide text after 'ai'.")
             return
         try:
             domain, body = await _haiku_structure_note(text, known_domains)
@@ -201,7 +201,7 @@ EDIT_SYNTAX = (
     "  `/edit threshold <domain>.<field> <value>`\n"
     "  Updates a numeric field in thresholds.yaml\n"
     "  Example: `/edit threshold novel.target 600`\n\n"
-    "*/edit --syntax* — show this message"
+    "*/edit syntax* — show this message"
 )
 
 
@@ -210,7 +210,7 @@ async def cmd_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     args = context.args or []
 
-    if not args or args[0] == "--syntax":
+    if not args or args[0] == "syntax":
         await update.message.reply_text(EDIT_SYNTAX, parse_mode="Markdown")
         return
 
