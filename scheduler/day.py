@@ -45,8 +45,9 @@ def load_state(root: Path, today: date) -> dict:
         if data.get("date") == today.isoformat():
             data.setdefault("dropped", [])
             data.setdefault("boosted", [])
+            data.setdefault("block_edits", [])
             return data
-    return {"date": today.isoformat(), "dropped": [], "boosted": []}
+    return {"date": today.isoformat(), "dropped": [], "boosted": [], "block_edits": []}
 
 
 def save_state(root: Path, state: dict) -> None:
@@ -55,9 +56,87 @@ def save_state(root: Path, state: dict) -> None:
 
 
 def reset_state(root: Path, today: date) -> dict:
-    state = {"date": today.isoformat(), "dropped": [], "boosted": []}
+    state = {"date": today.isoformat(), "dropped": [], "boosted": [], "block_edits": []}
     save_state(root, state)
     return state
+
+
+# --- Per-day block edits (manual reshuffle of the structure itself) ---------
+# The day template (schedule/template.yaml) is the standing skeleton. Some days
+# the user wants a one-off change — skip lunch, push a block later, extend one.
+# Those edits live in today-state.yaml under `block_edits` and are applied on
+# top of the template inside build_result, so they evaporate at the next reset
+# (next morning) without ever touching the Cowork-owned source of truth.
+#
+# Each edit is one of:
+#   {"op": "drop", "name": <block name>}                      remove for today
+#   {"op": "set",  "name": <block name>, "start"|"end": "HH:MM"}  retime today
+# Names match case-insensitively; edits for names not in the template are
+# ignored (the template may have changed since the edit was recorded).
+
+def resolve_block(blocks: list[dict], query: str):
+    """Resolve a user's block query to a canonical block name.
+
+    Returns (name, matches): an exact/unique match yields (name, [name]); an
+    ambiguous query yields (None, [several]); no match yields (None, []).
+    """
+    q = (query or "").strip().lower()
+    if not q:
+        return None, []
+    for b in blocks:
+        if b["name"].lower() == q:
+            return b["name"], [b["name"]]
+    matches = [b["name"] for b in blocks if q in b["name"].lower()]
+    return (matches[0], matches) if len(matches) == 1 else (None, matches)
+
+
+def apply_block_edits(blocks: list[dict], edits) -> list[dict]:
+    """Apply per-day drop/retime edits to a template block list.
+
+    Returns a new, start-sorted block list; the input is not mutated.
+    """
+    out = [dict(b) for b in blocks]
+    for e in edits or []:
+        op = e.get("op")
+        name = (e.get("name") or "").lower()
+        if op == "drop":
+            out = [b for b in out if b["name"].lower() != name]
+        elif op == "set":
+            for b in out:
+                if b["name"].lower() == name:
+                    if e.get("start"):
+                        b["start"] = e["start"]
+                    if e.get("end"):
+                        b["end"] = e["end"]
+    out.sort(key=lambda x: x["start"])
+    return out
+
+
+def toggle_drop_block(state: dict, name: str) -> str:
+    """Add or remove a 'drop' edit for `name`. Returns 'dropped' | 'restored'."""
+    edits = state.setdefault("block_edits", [])
+    existing = [e for e in edits if e.get("op") == "drop"
+                and (e.get("name") or "").lower() == name.lower()]
+    if existing:
+        for e in existing:
+            edits.remove(e)
+        return "restored"
+    edits.append({"op": "drop", "name": name})
+    return "dropped"
+
+
+def set_block_time(state: dict, name: str, start: str | None, end: str | None) -> None:
+    """Record a retime edit for `name`, replacing any prior retime for it."""
+    edits = state.setdefault("block_edits", [])
+    edit = {"op": "set", "name": name}
+    if start:
+        edit["start"] = start
+    if end:
+        edit["end"] = end
+    state["block_edits"] = [
+        e for e in edits
+        if not (e.get("op") == "set" and (e.get("name") or "").lower() == name.lower())
+    ] + [edit]
 
 
 def done_ids_today(root: Path, today: date) -> set:
@@ -76,6 +155,7 @@ def build_result(root: Path, today: Optional[date] = None):
     state = load_state(root, today)
     excluded = done_ids_today(root, today) | set(state.get("dropped", []))
     blocks, _source = load_day_template(root)
+    blocks = apply_block_edits(blocks, state.get("block_edits"))
     result = schedule(
         tasks, today, blocks=blocks,
         exclude_ids=excluded, boost_ids=set(state.get("boosted", [])),

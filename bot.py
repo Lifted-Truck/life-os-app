@@ -29,9 +29,13 @@ from scheduler.day import (
     build_result,
     load_state,
     reshuffle_and_write,
+    resolve_block,
     save_state,
+    set_block_time,
     task_in_block,
+    toggle_drop_block,
 )
+from scheduler.day_template import load_day_template
 
 load_dotenv(Path(__file__).parent / ".env", override=True)
 
@@ -469,9 +473,20 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_authorized(update):
         return
     root = get_life_os_root()
-    result = reshuffle_and_write(root, date.today())
+    today = date.today()
+    result = reshuffle_and_write(root, today)
 
     text = _format_schedule(result)
+    edits = load_state(root, today).get("block_edits", [])
+    if edits:
+        notes = []
+        for e in edits:
+            if e.get("op") == "drop":
+                notes.append(f"skipped {e['name']}")
+            elif e.get("op") == "set":
+                when = "–".join(x for x in (e.get("start"), e.get("end")) if x)
+                notes.append(f"{e['name']} → {when}")
+        text += "\n\nToday's edits: " + "; ".join(notes) + "  (/clearday to reset)"
     cur = _current_task_block(result)
     if cur is not None:
         text += f"\n\nIn progress: {cur.block['name']} — {cur.task.title}\nCheck in 👇"
@@ -509,6 +524,161 @@ async def cmd_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "➕ Which task should I pin into the day?",
         reply_markup=_numbered_keyboard(items, "ad"),
+    )
+
+
+# --- Manual block reshuffle (drop / retime the day's structure for today) ---
+#
+# The standing skeleton is Cowork-owned (schedule/template.yaml). These commands
+# layer one-off, single-day edits on top via today-state.yaml's block_edits, so
+# they reset overnight and never touch the source of truth:
+#   /skip            toggle-drop a block for today (e.g. skip lunch)
+#   /move <block> <HH:MM-HH:MM>   push/extend a block's window for today
+#   /clearday        clear all of today's block edits
+
+import re as _re
+
+_RANGE_RE = _re.compile(r"^([01]?\d|2[0-3]):[0-5]\d[-–]([01]?\d|2[0-3]):[0-5]\d$")
+_TIME_RE = _re.compile(r"^([01]?\d|2[0-3]):[0-5]\d$")
+
+
+def _norm_hhmm(t: str) -> str:
+    h, m = t.split(":")
+    return f"{int(h):02d}:{m}"
+
+
+def _parse_range(token: str):
+    """'15:00-17:00' -> ('15:00', '17:00'); returns None if malformed."""
+    if not _RANGE_RE.match(token):
+        return None
+    start, end = _re.split(r"[-–]", token, maxsplit=1)
+    start, end = _norm_hhmm(start), _norm_hhmm(end)
+    if end <= start:
+        return None
+    return start, end
+
+
+def _template_blocks():
+    blocks, _src = load_day_template(get_life_os_root())
+    return blocks
+
+
+async def cmd_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/skip — toggle-drop a block for today. No args: pick from a keyboard."""
+    if not is_authorized(update):
+        return
+    blocks = _template_blocks()
+    args = context.args or []
+    if not args:
+        root = get_life_os_root()
+        state = load_state(root, date.today())
+        dropped = {
+            (e.get("name") or "").lower()
+            for e in state.get("block_edits", []) if e.get("op") == "drop"
+        }
+        items = []
+        for i, b in enumerate(blocks):
+            mark = "🚫 " if b["name"].lower() in dropped else ""
+            items.append((str(i), f"{mark}{b['name']} ({b['start']}–{b['end']})"))
+        rows = [
+            [InlineKeyboardButton(label, callback_data=f"sk:{idx}")]
+            for idx, label in items
+        ]
+        await update.message.reply_text(
+            "Tap a block to skip it for today (tap again to restore):",
+            reply_markup=InlineKeyboardMarkup(rows),
+        )
+        return
+
+    name, matches = resolve_block(blocks, " ".join(args))
+    if name is None:
+        hint = ("No block matches that." if not matches
+                else "Ambiguous — matches: " + ", ".join(matches))
+        await update.message.reply_text(hint)
+        return
+    root = get_life_os_root()
+    today = date.today()
+    state = load_state(root, today)
+    verb = toggle_drop_block(state, name)
+    save_state(root, state)
+    reshuffle_and_write(root, today)
+    word = "skipped for today" if verb == "dropped" else "restored"
+    await update.message.reply_text(f"🗓 {name} {word}. Plan updated.")
+
+
+async def skip_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps from the /skip keyboard (sk:<index-into-template>)."""
+    query = update.callback_query
+    if query.message.chat.id != get_chat_id():
+        return
+    await query.answer()
+    _, _, idx_s = query.data.partition(":")
+    blocks = _template_blocks()
+    try:
+        block = blocks[int(idx_s)]
+    except (ValueError, IndexError):
+        return
+    root = get_life_os_root()
+    today = date.today()
+    state = load_state(root, today)
+    verb = toggle_drop_block(state, block["name"])
+    save_state(root, state)
+    reshuffle_and_write(root, today)
+    word = "skipped for today" if verb == "dropped" else "restored"
+    await query.edit_message_text(f"🗓 {block['name']} {word}. Plan updated.")
+
+
+async def cmd_move(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/move <block> <HH:MM-HH:MM> — retime a block for today only."""
+    if not is_authorized(update):
+        return
+    args = context.args or []
+    rng = None
+    name_words = []
+    for a in args:
+        if rng is None and _parse_range(a):
+            rng = _parse_range(a)
+        else:
+            name_words.append(a)
+    if rng is None or not name_words:
+        await update.message.reply_text(
+            "Usage: /move <block> <HH:MM-HH:MM>\n"
+            "e.g. /move Admin 15:00-17:00"
+        )
+        return
+
+    blocks = _template_blocks()
+    name, matches = resolve_block(blocks, " ".join(name_words))
+    if name is None:
+        hint = ("No block matches that." if not matches
+                else "Ambiguous — matches: " + ", ".join(matches))
+        await update.message.reply_text(hint)
+        return
+
+    root = get_life_os_root()
+    today = date.today()
+    state = load_state(root, today)
+    set_block_time(state, name, rng[0], rng[1])
+    save_state(root, state)
+    reshuffle_and_write(root, today)
+    await update.message.reply_text(
+        f"🗓 {name} moved to {rng[0]}–{rng[1]} for today. Plan updated."
+    )
+
+
+async def cmd_clearday(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/clearday — drop all of today's one-off block edits."""
+    if not is_authorized(update):
+        return
+    root = get_life_os_root()
+    today = date.today()
+    state = load_state(root, today)
+    n = len(state.get("block_edits", []))
+    state["block_edits"] = []
+    save_state(root, state)
+    reshuffle_and_write(root, today)
+    await update.message.reply_text(
+        f"🗓 Cleared {n} block edit(s). Back to the standing day shape."
     )
 
 
@@ -608,7 +778,11 @@ def run_bot() -> None:
     app.add_handler(CommandHandler("plan", cmd_plan))
     app.add_handler(CommandHandler("behind", cmd_behind))
     app.add_handler(CommandHandler("add", cmd_add))
+    app.add_handler(CommandHandler("skip", cmd_skip))
+    app.add_handler(CommandHandler("move", cmd_move))
+    app.add_handler(CommandHandler("clearday", cmd_clearday))
     app.add_handler(CallbackQueryHandler(checkin_callback, pattern=r"^ci:"))
+    app.add_handler(CallbackQueryHandler(skip_callback, pattern=r"^sk:"))
     app.add_handler(CallbackQueryHandler(reshuffle_choice_callback, pattern=r"^(rm|ad):"))
     logger.info("Bot starting (long-polling)...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
