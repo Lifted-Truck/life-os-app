@@ -162,6 +162,38 @@ async def _haiku_structure_note(text: str, known_domains: set[str]) -> tuple[str
     return domain, body
 
 
+async def _do_ai_note(update: Update, text: str) -> None:
+    """Haiku-structure freeform text into a tagged ingest note, then save it.
+
+    Shared by /ai and the `/note ai ...` form.
+    """
+    text = text.strip()
+    if not text:
+        await update.message.reply_text(
+            "Send some text after /ai, e.g. /ai call the dentist tomorrow"
+        )
+        return
+    known_domains = set(read_thresholds().keys())
+    try:
+        domain, body = await _haiku_structure_note(text, known_domains)
+    except Exception as e:
+        await update.message.reply_text(f"Error calling AI: {e}")
+        return
+    if not body:
+        await update.message.reply_text("Note body is empty.")
+        return
+    filename = write_ingest_note(domain, body)
+    tag_str = f" [{domain}]" if domain else ""
+    await update.message.reply_text(f"📝 Note saved{tag_str}: {filename}")
+
+
+async def cmd_ai(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/ai <text> — freeform note; Haiku tags the domain and cleans it up."""
+    if not is_authorized(update):
+        return
+    await _do_ai_note(update, " ".join(context.args or []))
+
+
 async def cmd_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_authorized(update):
         return
@@ -170,25 +202,17 @@ async def cmd_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(
             "Usage:\n"
             "  /note [domain] <text>   — tag optional, must match a domain name\n"
-            "  /note ai <text>         — let Haiku extract domain and clean text\n"
+            "  /ai <text>              — let Haiku tag & clean a freeform note\n"
             "  /note list              — same as /domain list"
         )
         return
 
-    known_domains = set(read_thresholds().keys())
+    if args[0] == "ai":  # backwards-compatible alias for /ai
+        await _do_ai_note(update, " ".join(args[1:]))
+        return
 
-    if args[0] == "ai":
-        text = " ".join(args[1:])
-        if not text:
-            await update.message.reply_text("Provide text after 'ai'.")
-            return
-        try:
-            domain, body = await _haiku_structure_note(text, known_domains)
-        except Exception as e:
-            await update.message.reply_text(f"Error calling AI: {e}")
-            return
-    else:
-        domain, body = _extract_domain(args, known_domains)
+    known_domains = set(read_thresholds().keys())
+    domain, body = _extract_domain(args, known_domains)
 
     if not body:
         await update.message.reply_text("Note body is empty.")
@@ -357,16 +381,69 @@ def _numbered_keyboard(items: list[tuple[str, str]], prefix: str) -> InlineKeybo
     return InlineKeyboardMarkup(rows)
 
 
+def _checkin_keyboard(block_name: str) -> InlineKeyboardMarkup:
+    """The done / partial / reschedule buttons for a block check-in."""
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Done", callback_data=f"ci:done:{block_name}"),
+        InlineKeyboardButton("⏩ Partial", callback_data=f"ci:partial:{block_name}"),
+        InlineKeyboardButton("🔁 Reschedule", callback_data=f"ci:reschedule:{block_name}"),
+    ]])
+
+
+def _now_hhmm() -> str:
+    from datetime import datetime
+    return datetime.now().strftime("%H:%M")
+
+
+def _format_schedule(result) -> str:
+    """A plain-text day plan suitable for a Telegram message (no Markdown)."""
+    lines = ["📋 Today's plan", ""]
+    for a in result.assignments:
+        b = a.block
+        when = f"{b['start']}-{b['end']}"
+        if a.task:
+            lines.append(f"{when}  {a.task.title}")
+        elif b["slot"] is None:
+            lines.append(f"{when}  · {b['name']}")
+        else:
+            lines.append(f"{when}  (open)")
+    if result.carried:
+        lines.append("")
+        lines.append("Carried: " + ", ".join(t.title for t in result.carried))
+    return "\n".join(lines)
+
+
+def _active_or_next_block(result):
+    """Return (assignment, label) for the current task-block, else the next one,
+    else the last task-block of the day. label is 'Now' / 'Next' / 'Last'."""
+    now = _now_hhmm()
+    task_asn = [a for a in result.assignments if a.task]
+    for a in task_asn:
+        if a.block["start"] <= now < a.block["end"]:
+            return a, "Now"
+    upcoming = [a for a in task_asn if a.block["start"] > now]
+    if upcoming:
+        return upcoming[0], "Next"
+    if task_asn:
+        return task_asn[-1], "Last"
+    return None, ""
+
+
 async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_authorized(update):
         return
     root = get_life_os_root()
     result = reshuffle_and_write(root, date.today())
-    await update.message.reply_text(
-        f"📋 Plan rebuilt: {len(result.placed)} placed, "
-        f"{len(result.carried)} carried, {len(result.blocked)} blocked.\n"
-        "Updated daily/README.md."
-    )
+
+    text = _format_schedule(result)
+    asn, label = _active_or_next_block(result)
+    if asn is not None:
+        text += f"\n\n{label}: {asn.block['name']} — {asn.task.title}\nCheck in below 👇"
+        await update.message.reply_text(
+            text, reply_markup=_checkin_keyboard(asn.block["name"])
+        )
+    else:
+        await update.message.reply_text(text)
 
 
 async def cmd_behind(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -470,16 +547,11 @@ async def send_notify(block_name: str) -> None:
 
 async def send_checkin(block_name: str) -> None:
     bot = Bot(token=os.getenv("TELEGRAM_BOT_TOKEN"))
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ Done", callback_data=f"ci:done:{block_name}"),
-        InlineKeyboardButton("⏩ Partial", callback_data=f"ci:partial:{block_name}"),
-        InlineKeyboardButton("🔁 Reschedule", callback_data=f"ci:reschedule:{block_name}"),
-    ]])
     async with bot:
         await bot.send_message(
             chat_id=get_chat_id(),
             text=f"⏱ *{block_name}* is wrapping up. How did it go?",
-            reply_markup=keyboard,
+            reply_markup=_checkin_keyboard(block_name),
             parse_mode="Markdown",
         )
 
@@ -493,6 +565,7 @@ def run_bot() -> None:
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("evening", cmd_evening))
     app.add_handler(CommandHandler("note", cmd_note))
+    app.add_handler(CommandHandler("ai", cmd_ai))
     app.add_handler(CommandHandler("edit", cmd_edit))
     app.add_handler(CommandHandler("domain", cmd_domain))
     app.add_handler(CommandHandler("plan", cmd_plan))
