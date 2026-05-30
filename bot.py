@@ -194,6 +194,44 @@ async def cmd_ai(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _do_ai_note(update, " ".join(context.args or []))
 
 
+async def cmd_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/log [domain] <what you did> — record a completed entry in today's log.
+
+    Retroactive / ad-hoc logging: for things the per-block check-in can't catch
+    (a block you finished before the bot was running, morning pages, anything
+    off-schedule). A leading domain tag makes it count toward that cadence.
+    """
+    if not is_authorized(update):
+        return
+    args = context.args or []
+    if not args:
+        await update.message.reply_text(
+            "Usage: /log [domain] <what you did>\n"
+            "Records a completed entry in today's log. Add a leading domain "
+            "(e.g. /log novel wrote 500 words) so it counts toward that cadence."
+        )
+        return
+
+    known_domains = set(read_thresholds().keys())
+    domain, body = _extract_domain(args, known_domains)
+    if not body:
+        await update.message.reply_text(
+            "Tell me what you did, e.g. /log morning pages done."
+        )
+        return
+
+    entry = {
+        "date": date.today().isoformat(),
+        "covered": body,
+        "outcome": "done",
+    }
+    if domain:
+        entry["domain"] = domain
+    append_log_entry(entry)
+    tag = f" [{domain}]" if domain else ""
+    await update.message.reply_text(f"📓 Logged{tag}: {body}")
+
+
 async def cmd_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_authorized(update):
         return
@@ -413,20 +451,18 @@ def _format_schedule(result) -> str:
     return "\n".join(lines)
 
 
-def _active_or_next_block(result):
-    """Return (assignment, label) for the current task-block, else the next one,
-    else the last task-block of the day. label is 'Now' / 'Next' / 'Last'."""
+def _current_task_block(result):
+    """The task-bearing assignment whose time window contains right now, or None.
+
+    Only a block that is actually in progress gets a check-in button — a fresh
+    morning plan should show the day, not prompt a check-in for a block that
+    hasn't started.
+    """
     now = _now_hhmm()
-    task_asn = [a for a in result.assignments if a.task]
-    for a in task_asn:
-        if a.block["start"] <= now < a.block["end"]:
-            return a, "Now"
-    upcoming = [a for a in task_asn if a.block["start"] > now]
-    if upcoming:
-        return upcoming[0], "Next"
-    if task_asn:
-        return task_asn[-1], "Last"
-    return None, ""
+    for a in result.assignments:
+        if a.task and a.block["start"] <= now < a.block["end"]:
+            return a
+    return None
 
 
 async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -436,11 +472,11 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     result = reshuffle_and_write(root, date.today())
 
     text = _format_schedule(result)
-    asn, label = _active_or_next_block(result)
-    if asn is not None:
-        text += f"\n\n{label}: {asn.block['name']} — {asn.task.title}\nCheck in below 👇"
+    cur = _current_task_block(result)
+    if cur is not None:
+        text += f"\n\nIn progress: {cur.block['name']} — {cur.task.title}\nCheck in 👇"
         await update.message.reply_text(
-            text, reply_markup=_checkin_keyboard(asn.block["name"])
+            text, reply_markup=_checkin_keyboard(cur.block["name"])
         )
     else:
         await update.message.reply_text(text)
@@ -566,6 +602,7 @@ def run_bot() -> None:
     app.add_handler(CommandHandler("evening", cmd_evening))
     app.add_handler(CommandHandler("note", cmd_note))
     app.add_handler(CommandHandler("ai", cmd_ai))
+    app.add_handler(CommandHandler("log", cmd_log))
     app.add_handler(CommandHandler("edit", cmd_edit))
     app.add_handler(CommandHandler("domain", cmd_domain))
     app.add_handler(CommandHandler("plan", cmd_plan))
