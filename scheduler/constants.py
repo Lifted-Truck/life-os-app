@@ -52,9 +52,12 @@ CADENCE_DAYS = {
     "as-scheduled": None,           # no cadence-debt
 }
 
-# --- Canonical day structure (mirrors schedule/template.md) ----------------
-# Each block: name, start "HH:MM", end "HH:MM", slot tag (None = not schedulable).
-# This is the script-owned default day. Slot-bearing blocks receive tasks.
+# --- Canonical day structure (FALLBACK ONLY) -------------------------------
+# The live day structure is authored in <LIFE_OS_ROOT>/schedule/template.yaml and
+# loaded by scheduler.day_template. DEFAULT_BLOCKS is the built-in fallback used
+# only when neither that file nor the app's last-known-good cache is available.
+# Keep it as a sensible standalone day. Each block: name, start "HH:MM",
+# end "HH:MM", slot tag (None = not schedulable). Slot-bearing blocks receive tasks.
 
 # Morning Pages is a fixed daily ritual (slot None = the engine never schedules
 # a task into it). Two practice-creative blocks exist because the creative

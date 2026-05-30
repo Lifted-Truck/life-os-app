@@ -17,6 +17,7 @@ from typing import Optional
 import yaml
 
 from .compile_queue import load_queue
+from .day_template import load_day_template
 from .logs import read_log_entries
 from .schedule import render_daily_readme_body, schedule
 
@@ -74,7 +75,11 @@ def build_result(root: Path, today: Optional[date] = None):
     tasks, _lint, _gen = load_queue(root)
     state = load_state(root, today)
     excluded = done_ids_today(root, today) | set(state.get("dropped", []))
-    result = schedule(tasks, today, exclude_ids=excluded, boost_ids=set(state.get("boosted", [])))
+    blocks, _source = load_day_template(root)
+    result = schedule(
+        tasks, today, blocks=blocks,
+        exclude_ids=excluded, boost_ids=set(state.get("boosted", [])),
+    )
     return result, state
 
 

@@ -4,3 +4,7 @@ __pycache__/
 *.pyc
 *.pyo
 .DS_Store
+.pytest_cache/
+
+# last-known-good day-template cache (rebuilt at runtime from the data tree)
+cache/
