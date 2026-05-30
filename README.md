@@ -84,7 +84,7 @@ These are one-shot sends, intended to be fired by a scheduler at block times:
 | `/behind` | Running behind — pick a scheduled task to **drop** for today; the day reshuffles. |
 | `/add` | Pin a **carried** task into the day; the day reshuffles. |
 | `/skip` | Skip a block for today (e.g. lunch). No args → tap-to-pick keyboard; tap again to restore. One-off, resets overnight. |
-| `/move <block> <HH:MM-HH:MM>` | Retime a block for today only, e.g. `/move Admin 15:00-17:00`. |
+| `/move <block> <HH:MM-HH:MM>` | Retime a block for today, e.g. `/move Admin 15:00-17:00`. If the edit overlaps a neighbour the bot offers **Apply as-is / Cascade / Skip neighbour / Cancel** on an inline keyboard. |
 | `/clearday` | Clear today's block edits; back to the standing day shape. |
 | `/log [domain] <text>` | Record a completed entry in today's log (retroactive / off-schedule). A leading domain makes it count toward that cadence. |
 | `/ai <text>` | Freeform note — Haiku tags the domain and cleans it, then saves to `ingest/`. |
@@ -94,6 +94,14 @@ These are one-shot sends, intended to be fired by a scheduler at block times:
 | `/domain list` | List the known domains. |
 | `/evening <brief>` | Haiku summarizes your evening into the day's log. |
 | `/start` | Connectivity check. |
+
+### Notifications
+
+While the bot is running it auto-schedules a **T-5 notification** before each
+block's start and a **T-5 check-in** before each task-bearing block's end
+(`notifications.py` + an in-process APScheduler). Re-armed on every `/plan`
+reshuffle and at 00:05 daily for the new day. The legacy `--notify` / `--checkin`
+CLI handles are still present for cron when the system moves to a VPS.
 
 ### Check-in buttons
 
