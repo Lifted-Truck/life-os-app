@@ -97,7 +97,7 @@ def write_ingest_note(domain: str, body: str) -> str:
 
 def append_log_entry(entry: dict) -> None:
     lines = [f"## {entry.get('date', date.today().isoformat())}", ""]
-    for field in ("duration", "type", "covered", "outcome", "notes", "waiting"):
+    for field in ("duration", "type", "covered", "outcome", "task", "notes", "waiting"):
         if entry.get(field):
             lines.append(f"- **{field}:** {entry[field]}")
     lines.append("")

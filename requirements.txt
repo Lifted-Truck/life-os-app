@@ -3,3 +3,6 @@ python-telegram-bot>=20.0
 pyyaml
 resend
 python-dotenv
+
+# dev/test only
+pytest

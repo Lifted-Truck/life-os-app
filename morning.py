@@ -1,102 +1,45 @@
 import os
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date
 from pathlib import Path
 
-import anthropic
 import resend
-import yaml
 from dotenv import load_dotenv
 
 from utils import (
     get_life_os_root,
-    read_file,
-    read_thresholds,
     write_file,
 )
+from scheduler.compile_queue import compile_to_file
+from scheduler.day import build_result, reset_state, write_daily_readme
+from scheduler.schedule import render_daily_readme_body
 
 load_dotenv(Path(__file__).parent / ".env", override=True)
 
-MODEL = "claude-haiku-4-5-20251001"
-
-DAILY_README_TEMPLATE = """\
-<!-- SCRIPT-OWNED: overwritten each morning by cron. Do not restructure. -->
-
-# Daily Plan
-
-**Date:** {date}
-**Generated:** {generated}
-
-{body}"""
-
-SYSTEM_PROMPT = """\
-You are a daily planning assistant for a personal life operating system.
-Given the user's domain thresholds, schedule template, and yesterday's activity,
-generate a concise daily block plan.
-
-Return ONLY the content for these four sections, in this exact format:
-
-## Available Time Today
-[Brief note on available time based on the schedule template]
-
-## Today's Blocks
-
-| Time | Domain | Task | Type | Duration | Status |
-|------|--------|------|------|----------|--------|
-[One row per workable block. Match domains to thresholds. Tasks should be specific and actionable.]
-
-## Non-Negotiables Today
-[List any mandatory-weekly thresholds due or at risk today. If none, write: None flagged.]
-
-## Carried Forward
-[List any missed or rescheduled items from yesterday's log. If none, write: None.]
-
-Keep content brief. Do not add sections or commentary outside these four."""
-
-
-def _read_yesterday_log() -> str:
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
-    try:
-        return read_file(f"daily/logs/{yesterday}.md")
-    except FileNotFoundError:
-        return "No log found for yesterday."
-
-
-def _build_user_prompt(thresholds: dict, schedule: str, yesterday_log: str) -> str:
-    thresholds_text = yaml.dump(thresholds, default_flow_style=False)
-    return "\n\n".join([
-        f"Today's date: {date.today().isoformat()}",
-        f"## Domain Thresholds\n\n{thresholds_text}",
-        f"## Schedule Template\n\n{schedule}",
-        f"## Yesterday's Log\n\n{yesterday_log}",
-    ])
-
 
 def generate_plan() -> str:
-    thresholds = read_thresholds()
-    schedule = read_file("schedule/template.md")
-    yesterday_log = _read_yesterday_log()
+    """Build today's plan deterministically — NO AI (SYSTEM.md governing principle).
 
-    client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-    message = client.messages.create(
-        model=MODEL,
-        max_tokens=1024,
-        system=SYSTEM_PROMPT,
-        messages=[
-            {"role": "user", "content": _build_user_prompt(thresholds, schedule, yesterday_log)}
-        ],
-    )
-    return message.content[0].text
+    compile() regenerates schedule/queue.yaml from the four task sources + logs,
+    resets the day's reshuffle state, then the shared schedule() engine places
+    tasks into the day's blocks. morning.py and bot.py share this engine.
+    Returns the rendered README body (for the log + email).
+    """
+    root = get_life_os_root()
+    today = date.today()
 
+    tasks, lint = compile_to_file(root, today)
+    reset_state(root, today)                       # fresh day: clear drops/boosts
+    result, _state = build_result(root, today)
+    write_daily_readme(root, result, today)
 
-def write_daily_readme(body: str) -> None:
-    now = datetime.now()
-    content = DAILY_README_TEMPLATE.format(
-        date=now.strftime("%Y-%m-%d"),
-        generated=now.strftime("%H:%M"),
-        body=body,
-    )
-    write_file("daily/README.md", content)
+    errors = [i for i in lint if i.level == "error"]
+    if errors:
+        print(f"compile() raised {len(errors)} lint error(s):", file=sys.stderr)
+        for i in errors:
+            print(f"  [{i.where}] {i.message}", file=sys.stderr)
+
+    return render_daily_readme_body(result, today)
 
 
 def create_today_log(plan_body: str) -> None:
@@ -132,8 +75,7 @@ def main():
         print(f"Error generating plan: {e}", file=sys.stderr)
         sys.exit(1)
 
-    write_daily_readme(plan_body)
-    print("Wrote daily/README.md")
+    print("Wrote daily/README.md (compiled queue.yaml + deterministic schedule)")
 
     create_today_log(plan_body)
     print(f"Created daily/logs/{date.today().isoformat()}.md")
