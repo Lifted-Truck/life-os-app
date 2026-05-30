@@ -39,6 +39,9 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
+# httpx logs full request URLs at INFO, which include the bot token in the
+# path (.../bot<TOKEN>/getUpdates). Keep that out of the logs.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 MODEL = "claude-haiku-4-5-20251001"
