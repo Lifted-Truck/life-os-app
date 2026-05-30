@@ -10,11 +10,14 @@ from scheduler.compile_queue import compile_to_file
 from scheduler.day import (
     apply_block_edits,
     build_result,
+    cascade_shift_edits,
+    find_overlaps,
     load_state,
     reset_state,
     resolve_block,
     save_state,
     set_block_time,
+    skip_conflict_edits,
     toggle_drop_block,
 )
 
@@ -102,6 +105,60 @@ def test_set_block_time_replaces_prior():
     set_block_time(state, "Admin / Career", "16:00", "18:00")
     sets = [e for e in state["block_edits"] if e["op"] == "set"]
     assert len(sets) == 1 and sets[0]["start"] == "16:00" and sets[0]["end"] == "18:00"
+
+
+# --- conflict resolution ----------------------------------------------------
+
+def test_find_overlaps_none():
+    assert find_overlaps(BLOCKS) == []
+
+
+def test_find_overlaps_detects_adjacent_collision():
+    edited = apply_block_edits(
+        BLOCKS, [{"op": "set", "name": "Deep Work 1", "end": "13:00"}])
+    overlaps = find_overlaps(edited)
+    # Deep Work 1 (08-13) now eats into Lunch (12:30-13:30): 30-min overlap
+    assert overlaps == [("Deep Work 1", "Lunch", 30)]
+
+
+def test_find_overlaps_reports_every_engulfed_block():
+    blocks = [
+        {"name": "Long", "start": "08:00", "end": "13:00", "slot": "deep-work"},
+        {"name": "B1",   "start": "10:00", "end": "10:30", "slot": None},
+        {"name": "B2",   "start": "10:30", "end": "12:30", "slot": "deep-work"},
+        {"name": "B3",   "start": "12:30", "end": "13:30", "slot": None},
+    ]
+    overlaps = find_overlaps(blocks)
+    names = {(a, b) for a, b, _ in overlaps}
+    # Long engulfs B1 (30m), B2 (120m), B3 partially (30m)
+    assert ("Long", "B1") in names
+    assert ("Long", "B2") in names
+    assert ("Long", "B3") in names
+
+
+def test_cascade_shift_pushes_later_blocks():
+    pending = {"op": "set", "name": "Deep Work 1", "end": "13:00"}
+    edits, ran_past = cascade_shift_edits(BLOCKS, pending)
+    assert not ran_past
+    # Lunch should be pushed by 30 min to 13:00-14:00
+    lunch_edit = next(e for e in edits if e["name"] == "Lunch")
+    assert lunch_edit["start"] == "13:00" and lunch_edit["end"] == "14:00"
+    # Original edit stays at the front of the list
+    assert edits[0] is pending
+
+
+def test_cascade_warns_when_capping_at_midnight():
+    pending = {"op": "set", "name": "Admin / Career", "end": "23:00"}
+    blocks = BLOCKS + [{"name": "Wind-Down", "start": "20:00", "end": "21:00", "slot": "wind-down"}]
+    _edits, ran_past = cascade_shift_edits(blocks, pending)
+    assert ran_past is True
+
+
+def test_skip_conflict_drops_the_neighbour():
+    pending = {"op": "set", "name": "Deep Work 1", "end": "13:00"}
+    edits = skip_conflict_edits(BLOCKS, pending)
+    assert {"op": "drop", "name": "Lunch"} in edits
+    assert pending in edits
 
 
 # --- end-to-end through build_result ----------------------------------------

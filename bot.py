@@ -26,16 +26,21 @@ from utils import (
     write_ingest_note,
 )
 from scheduler.day import (
+    apply_block_edits,
     build_result,
+    cascade_shift_edits,
+    find_overlaps,
     load_state,
     reshuffle_and_write,
     resolve_block,
     save_state,
     set_block_time,
+    skip_conflict_edits,
     task_in_block,
     toggle_drop_block,
 )
 from scheduler.day_template import load_day_template
+import notifications
 
 load_dotenv(Path(__file__).parent / ".env", override=True)
 
@@ -390,6 +395,7 @@ async def checkin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             state["dropped"].append(task_id)
         save_state(root, state)
     reshuffle_and_write(root, today)
+    await _arm_today()
 
     labels = {
         "done": "✅ Done",
@@ -475,6 +481,7 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     root = get_life_os_root()
     today = date.today()
     result = reshuffle_and_write(root, today)
+    await _arm_today()
 
     text = _format_schedule(result)
     edits = load_state(root, today).get("block_edits", [])
@@ -602,6 +609,7 @@ async def cmd_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     verb = toggle_drop_block(state, name)
     save_state(root, state)
     reshuffle_and_write(root, today)
+    await _arm_today()
     word = "skipped for today" if verb == "dropped" else "restored"
     await update.message.reply_text(f"🗓 {name} {word}. Plan updated.")
 
@@ -624,6 +632,7 @@ async def skip_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     verb = toggle_drop_block(state, block["name"])
     save_state(root, state)
     reshuffle_and_write(root, today)
+    await _arm_today()
     word = "skipped for today" if verb == "dropped" else "restored"
     await query.edit_message_text(f"🗓 {block['name']} {word}. Plan updated.")
 
@@ -657,13 +666,115 @@ async def cmd_move(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     root = get_life_os_root()
     today = date.today()
+    pending = {"op": "set", "name": name, "start": rng[0], "end": rng[1]}
+
+    # Detect conflicts BEFORE saving: simulate against the current effective
+    # block shape (template + already-applied edits).
     state = load_state(root, today)
-    set_block_time(state, name, rng[0], rng[1])
-    save_state(root, state)
-    reshuffle_and_write(root, today)
-    await update.message.reply_text(
-        f"🗓 {name} moved to {rng[0]}–{rng[1]} for today. Plan updated."
+    template, _ = load_day_template(root)
+    current = apply_block_edits(template, state.get("block_edits", []))
+    prospective = apply_block_edits(template,
+                                    list(state.get("block_edits", [])) + [pending])
+    overlaps = find_overlaps(prospective)
+
+    if not overlaps:
+        set_block_time(state, name, rng[0], rng[1])
+        save_state(root, state)
+        reshuffle_and_write(root, today)
+        await _arm_today()
+        await update.message.reply_text(
+            f"🗓 {name} moved to {rng[0]}–{rng[1]} for today. Plan updated."
+        )
+        return
+
+    # Stash the pending edit so the callback can apply the user's choice.
+    context.user_data["pending_move"] = pending
+
+    overlap_lines = "\n".join(
+        f"• {a} ends at {next(b['end'] for b in prospective if b['name']==a)}, "
+        f"but {b} starts at {next(bb['start'] for bb in prospective if bb['name']==b)} "
+        f"({d} min overlap)"
+        for a, b, d in overlaps
     )
+    cascade_edits, ran_past = cascade_shift_edits(current, pending)
+    shift_summary = ", ".join(
+        f"{e['name']}→{e['start']}–{e['end']}"
+        for e in cascade_edits[1:]
+    ) or "no later blocks"
+    skip_edits = skip_conflict_edits(current, pending)
+    skip_names = ", ".join(e["name"] for e in skip_edits if e["op"] == "drop") or "—"
+    warn = "\n⚠ cascade would run past midnight (capped)." if ran_past else ""
+
+    text = (
+        f"⚠ /move {name} {rng[0]}–{rng[1]} conflicts:\n"
+        f"{overlap_lines}\n\n"
+        f"Options:\n"
+        f"• Apply as-is — keep the overlap\n"
+        f"• Cascade shift — push later blocks: {shift_summary}{warn}\n"
+        f"• Skip conflicting — also drop: {skip_names}\n"
+        f"• Cancel"
+    )
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Apply as-is", callback_data="mv:apply"),
+         InlineKeyboardButton("Cascade", callback_data="mv:cascade")],
+        [InlineKeyboardButton("Skip neighbour", callback_data="mv:skip"),
+         InlineKeyboardButton("Cancel", callback_data="mv:cancel")],
+    ])
+    await update.message.reply_text(text, reply_markup=kb)
+
+
+async def move_conflict_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Apply the user's choice from the /move conflict menu."""
+    query = update.callback_query
+    if query.message.chat.id != get_chat_id():
+        return
+    await query.answer()
+    _, _, choice = query.data.partition(":")
+
+    pending = context.user_data.get("pending_move")
+    if not pending and choice != "cancel":
+        await query.edit_message_text("That conflict prompt has expired. Re-run /move.")
+        return
+
+    if choice == "cancel":
+        context.user_data.pop("pending_move", None)
+        await query.edit_message_text("Cancelled. No changes made.")
+        return
+
+    root = get_life_os_root()
+    today = date.today()
+    state = load_state(root, today)
+    template, _ = load_day_template(root)
+
+    if choice == "apply":
+        edits_to_add = [pending]
+        verb = "applied with overlap"
+    elif choice == "cascade":
+        edits_to_add, _past = cascade_shift_edits(
+            apply_block_edits(template, state.get("block_edits", [])), pending)
+        verb = "cascaded"
+    elif choice == "skip":
+        edits_to_add = skip_conflict_edits(
+            apply_block_edits(template, state.get("block_edits", [])), pending)
+        verb = "applied; conflicting neighbour dropped"
+    else:
+        return
+
+    # Replace any prior 'set' for the moved name, then append new edits.
+    moved = pending["name"].lower()
+    state.setdefault("block_edits", [])
+    state["block_edits"] = [
+        e for e in state["block_edits"]
+        if not (e.get("op") == "set" and (e.get("name") or "").lower() == moved)
+    ]
+    for e in edits_to_add:
+        state["block_edits"].append(e)
+    save_state(root, state)
+    context.user_data.pop("pending_move", None)
+    reshuffle_and_write(root, today)
+    await _arm_today()
+
+    await query.edit_message_text(f"🗓 {pending['name']} {verb}. Plan updated.")
 
 
 async def cmd_clearday(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -677,6 +788,7 @@ async def cmd_clearday(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     state["block_edits"] = []
     save_state(root, state)
     reshuffle_and_write(root, today)
+    await _arm_today()
     await update.message.reply_text(
         f"🗓 Cleared {n} block edit(s). Back to the standing day shape."
     )
@@ -713,6 +825,7 @@ async def reshuffle_choice_callback(update: Update, context: ContextTypes.DEFAUL
 
     save_state(root, state)
     result = reshuffle_and_write(root, today)
+    await _arm_today()
     await query.edit_message_text(
         f"{verb} {task_id}. Plan updated: "
         f"{len(result.placed)} placed, {len(result.carried)} carried."
@@ -735,6 +848,24 @@ def _get_block_task(block_name: str) -> str:
     except Exception:
         pass
     return ""
+
+
+# --- T-5 in-process scheduler --------------------------------------------
+# Armed at startup, re-armed on every /plan, and re-armed at 00:05 daily so
+# tomorrow comes online without manual input. See notifications.py.
+
+_aps_scheduler = None  # AsyncIOScheduler instance, set in post_init
+
+
+async def _arm_today() -> int:
+    if _aps_scheduler is None:
+        return 0
+    armed = notifications.arm(
+        _aps_scheduler, build_result, get_life_os_root(),
+        send_notify, send_checkin, _arm_today,
+    )
+    logger.info("T-5 jobs armed: %d", armed)
+    return armed
 
 
 async def send_notify(block_name: str) -> None:
@@ -766,8 +897,22 @@ async def send_checkin(block_name: str) -> None:
 # Entry point
 # ---------------------------------------------------------------------------
 
+async def _post_init(application) -> None:
+    """Bring the in-process APScheduler up and arm today's T-5 jobs."""
+    global _aps_scheduler
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    _aps_scheduler = AsyncIOScheduler()
+    _aps_scheduler.start()
+    await _arm_today()
+
+
 def run_bot() -> None:
-    app = Application.builder().token(os.getenv("TELEGRAM_BOT_TOKEN")).build()
+    app = (
+        Application.builder()
+        .token(os.getenv("TELEGRAM_BOT_TOKEN"))
+        .post_init(_post_init)
+        .build()
+    )
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("evening", cmd_evening))
     app.add_handler(CommandHandler("note", cmd_note))
@@ -783,6 +928,7 @@ def run_bot() -> None:
     app.add_handler(CommandHandler("clearday", cmd_clearday))
     app.add_handler(CallbackQueryHandler(checkin_callback, pattern=r"^ci:"))
     app.add_handler(CallbackQueryHandler(skip_callback, pattern=r"^sk:"))
+    app.add_handler(CallbackQueryHandler(move_conflict_callback, pattern=r"^mv:"))
     app.add_handler(CallbackQueryHandler(reshuffle_choice_callback, pattern=r"^(rm|ad):"))
     logger.info("Bot starting (long-polling)...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)

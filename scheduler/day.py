@@ -112,6 +112,87 @@ def apply_block_edits(blocks: list[dict], edits) -> list[dict]:
     return out
 
 
+def _to_min(hhmm: str) -> int:
+    h, m = hhmm.split(":")
+    return int(h) * 60 + int(m)
+
+
+def _from_min(m: int) -> str:
+    m = max(0, min(m, 24 * 60 - 1))
+    return f"{m // 60:02d}:{m % 60:02d}"
+
+
+def find_overlaps(blocks: list[dict]) -> list[tuple[str, str, int]]:
+    """Return every overlapping pair as (earlier_name, later_name, minutes).
+
+    Walks blocks in start order and reports each (a, b) with overlap. Reports
+    every later block a long edit engulfs — not just the first — so the user
+    sees the full collision when skipping conflicting neighbours. Overlap is
+    the intersection length: min(a_end, b_end) − b_start.
+    """
+    out: list[tuple[str, str, int]] = []
+    ordered = sorted(blocks, key=lambda x: x["start"])
+    for i, a in enumerate(ordered):
+        a_end = _to_min(a["end"])
+        for b in ordered[i + 1:]:
+            b_start = _to_min(b["start"])
+            if b_start >= a_end:
+                break  # ordered by start: nothing later can collide with a
+            overlap = min(a_end, _to_min(b["end"])) - b_start
+            out.append((a["name"], b["name"], overlap))
+    return out
+
+
+def cascade_shift_edits(template_blocks: list[dict],
+                        pending_edit: dict) -> tuple[list[dict], bool]:
+    """Compute the edit list needed to push later blocks out of the way.
+
+    Returns (edits, ran_past_midnight). The first edit is `pending_edit`
+    itself; any further `set` edits push subsequent blocks forward by exactly
+    the overlap delta. `ran_past_midnight` is True if a shift would have run
+    past 23:59 (and was capped) — the caller can warn the user.
+    """
+    blocks = apply_block_edits(template_blocks, [pending_edit])
+    ordered = sorted(blocks, key=lambda x: x["start"])
+    edits: list[dict] = [pending_edit]
+    ran_past = False
+    for i in range(len(ordered) - 1):
+        a = ordered[i]
+        b = ordered[i + 1]
+        a_end = _to_min(a["end"])
+        b_start = _to_min(b["start"])
+        if b_start < a_end:
+            delta = a_end - b_start
+            new_start = a_end
+            new_end = _to_min(b["end"]) + delta
+            if new_end >= 24 * 60:
+                ran_past = True
+                new_end = 24 * 60 - 1
+            ordered[i + 1] = dict(b, start=_from_min(new_start), end=_from_min(new_end))
+            edits.append({
+                "op": "set", "name": b["name"],
+                "start": _from_min(new_start), "end": _from_min(new_end),
+            })
+    return edits, ran_past
+
+
+def skip_conflict_edits(template_blocks: list[dict],
+                        pending_edit: dict) -> list[dict]:
+    """Edits that apply the move plus drop every block it directly collides with."""
+    blocks = apply_block_edits(template_blocks, [pending_edit])
+    overlaps = find_overlaps(blocks)
+    moved_name = pending_edit["name"].lower()
+    edits: list[dict] = [pending_edit]
+    seen: set[str] = set()
+    for earlier, later, _delta in overlaps:
+        # drop whichever side of the pair *isn't* the block we just moved
+        victim = later if earlier.lower() == moved_name else earlier
+        if victim.lower() != moved_name and victim.lower() not in seen:
+            edits.append({"op": "drop", "name": victim})
+            seen.add(victim.lower())
+    return edits
+
+
 def toggle_drop_block(state: dict, name: str) -> str:
     """Add or remove a 'drop' edit for `name`. Returns 'dropped' | 'restored'."""
     edits = state.setdefault("block_edits", [])
