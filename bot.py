@@ -8,7 +8,7 @@ from pathlib import Path
 
 import anthropic
 from dotenv import load_dotenv
-from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Bot, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -72,6 +72,51 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_authorized(update):
         return
     await update.message.reply_text("Life OS bot is running.")
+
+
+# --- /commands — chat-side command index --------------------------------
+# Single source of truth: COMMAND_REGISTRY. /commands renders the grouped
+# text; setMyCommands publishes the flat list to Telegram autocomplete so
+# typing "/" surfaces the full menu on phone.
+
+COMMAND_REGISTRY: list[tuple[str, str, str]] = [
+    # (group, command, one-line description)
+    ("Daily flow", "plan",      "Show today's plan; check-in if a block is in progress"),
+    ("Daily flow", "log",       "[domain] <what you did> — record a completed entry"),
+    ("Daily flow", "ai",        "<text> — freeform note; Haiku tags and saves it"),
+
+    ("Reshuffle",  "behind",    "Running behind — pick a scheduled task to drop"),
+    ("Reshuffle",  "add",       "Pin a carried task into the day"),
+    ("Reshuffle",  "skip",      "Skip a block for today (toggle)"),
+    ("Reshuffle",  "move",      "<block> <HH:MM-HH:MM> — retime a block for today"),
+    ("Reshuffle",  "extend",    "[N=30] — extend the in-progress block by N minutes"),
+    ("Reshuffle",  "clearday",  "Clear today's block edits"),
+
+    ("Inputs",     "note",      "[domain] <text> — save an ingest note"),
+    ("Inputs",     "edit",      "inbox <text> | threshold <d>.<f> <v>"),
+    ("Inputs",     "domain",    "list — show known domains"),
+
+    ("Misc",       "evening",   "<brief> — Haiku summarizes your evening into the log"),
+    ("Misc",       "commands",  "Show this list"),
+    ("Misc",       "start",     "Connectivity check"),
+]
+
+
+def _format_command_list() -> str:
+    lines: list[str] = ["📖 Commands\n"]
+    current_group = None
+    for group, cmd, desc in COMMAND_REGISTRY:
+        if group != current_group:
+            lines.append(f"\n{group}")
+            current_group = group
+        lines.append(f"  /{cmd} — {desc}")
+    return "\n".join(lines)
+
+
+async def cmd_commands(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_authorized(update):
+        return
+    await update.message.reply_text(_format_command_list())
 
 
 async def cmd_evening(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -430,12 +475,19 @@ def _numbered_keyboard(items: list[tuple[str, str]], prefix: str) -> InlineKeybo
 
 
 def _checkin_keyboard(block_name: str) -> InlineKeyboardMarkup:
-    """The done / partial / reschedule buttons for a block check-in."""
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ Done", callback_data=f"ci:done:{block_name}"),
-        InlineKeyboardButton("⏩ Partial", callback_data=f"ci:partial:{block_name}"),
-        InlineKeyboardButton("🔁 Reschedule", callback_data=f"ci:reschedule:{block_name}"),
-    ]])
+    """The done / partial / reschedule + tap-to-extend rows for a block check-in."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Done", callback_data=f"ci:done:{block_name}"),
+            InlineKeyboardButton("⏩ Partial", callback_data=f"ci:partial:{block_name}"),
+            InlineKeyboardButton("🔁 Reschedule", callback_data=f"ci:reschedule:{block_name}"),
+        ],
+        [
+            InlineKeyboardButton("+15", callback_data=f"ex:15:{block_name}"),
+            InlineKeyboardButton("+30", callback_data=f"ex:30:{block_name}"),
+            InlineKeyboardButton("+60", callback_data=f"ex:60:{block_name}"),
+        ],
+    ])
 
 
 def _now_hhmm() -> str:
@@ -664,31 +716,39 @@ async def cmd_move(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(hint)
         return
 
+    pending = {"op": "set", "name": name, "start": rng[0], "end": rng[1]}
+    await _perform_move(update.message.reply_text, context.user_data, pending,
+                        verb="moved")
+
+
+async def _perform_move(reply_fn, user_data: dict, pending: dict, *,
+                        verb: str = "moved") -> None:
+    """Apply a `set` block edit, or open the conflict menu if it overlaps.
+
+    Shared by /move, /extend, and the check-in extend buttons. `reply_fn` is
+    the send-text callable from whichever surface (a Message or a
+    callback-query Message); it must accept `reply_markup=` kwarg.
+    """
     root = get_life_os_root()
     today = date.today()
-    pending = {"op": "set", "name": name, "start": rng[0], "end": rng[1]}
-
-    # Detect conflicts BEFORE saving: simulate against the current effective
-    # block shape (template + already-applied edits).
     state = load_state(root, today)
     template, _ = load_day_template(root)
     current = apply_block_edits(template, state.get("block_edits", []))
     prospective = apply_block_edits(template,
                                     list(state.get("block_edits", [])) + [pending])
     overlaps = find_overlaps(prospective)
+    name, start, end = pending["name"], pending["start"], pending["end"]
 
     if not overlaps:
-        set_block_time(state, name, rng[0], rng[1])
+        set_block_time(state, name, start, end)
         save_state(root, state)
         reshuffle_and_write(root, today)
         await _arm_today()
-        await update.message.reply_text(
-            f"🗓 {name} moved to {rng[0]}–{rng[1]} for today. Plan updated."
-        )
+        await reply_fn(f"🗓 {name} {verb} to {start}–{end}. Plan updated.")
         return
 
     # Stash the pending edit so the callback can apply the user's choice.
-    context.user_data["pending_move"] = pending
+    user_data["pending_move"] = pending
 
     overlap_lines = "\n".join(
         f"• {a} ends at {next(b['end'] for b in prospective if b['name']==a)}, "
@@ -706,7 +766,7 @@ async def cmd_move(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     warn = "\n⚠ cascade would run past midnight (capped)." if ran_past else ""
 
     text = (
-        f"⚠ /move {name} {rng[0]}–{rng[1]} conflicts:\n"
+        f"⚠ {name} → {start}–{end} conflicts:\n"
         f"{overlap_lines}\n\n"
         f"Options:\n"
         f"• Apply as-is — keep the overlap\n"
@@ -720,7 +780,93 @@ async def cmd_move(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         [InlineKeyboardButton("Skip neighbour", callback_data="mv:skip"),
          InlineKeyboardButton("Cancel", callback_data="mv:cancel")],
     ])
-    await update.message.reply_text(text, reply_markup=kb)
+    await reply_fn(text, reply_markup=kb)
+
+
+# --- /extend [N] — push the in-progress block's end forward by N minutes -----
+
+def _add_minutes(hhmm: str, minutes: int) -> str:
+    """'10:15' + 30 -> '10:45'. Caps at 23:59 so we never spill past midnight."""
+    h, m = hhmm.split(":")
+    total = int(h) * 60 + int(m) + int(minutes)
+    total = max(0, min(total, 24 * 60 - 1))
+    return f"{total // 60:02d}:{total % 60:02d}"
+
+
+def _effective_block_by_name(root, today, name: str):
+    """Look up a block by name in today's effective shape (template + edits)."""
+    state = load_state(root, today)
+    template, _ = load_day_template(root)
+    for b in apply_block_edits(template, state.get("block_edits", [])):
+        if b["name"].lower() == name.lower():
+            return b
+    return None
+
+
+async def cmd_extend(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/extend [N] — push the in-progress block's end forward by N min (default 30)."""
+    if not is_authorized(update):
+        return
+    args = context.args or []
+    try:
+        minutes = int(args[0]) if args else 30
+    except ValueError:
+        await update.message.reply_text("Usage: /extend [minutes]  (default 30)")
+        return
+    if minutes <= 0 or minutes > 240:
+        await update.message.reply_text("Pick an extension between 1 and 240 minutes.")
+        return
+
+    root = get_life_os_root()
+    today = date.today()
+    result, _state = build_result(root, today)
+    cur = _current_task_block(result)
+    if cur is None:
+        await update.message.reply_text(
+            "No block is in progress right now — nothing to extend.\n"
+            "Use /move <block> <HH:MM-HH:MM> to retime a specific block."
+        )
+        return
+    b = cur.block
+    pending = {
+        "op": "set", "name": b["name"],
+        "start": b["start"],
+        "end": _add_minutes(b["end"], minutes),
+    }
+    await _perform_move(update.message.reply_text, context.user_data, pending,
+                        verb=f"extended (+{minutes}m)")
+
+
+async def extend_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the +15 / +30 / +60 buttons attached to every check-in keyboard."""
+    query = update.callback_query
+    if query.message.chat.id != get_chat_id():
+        return
+    await query.answer()
+    parts = query.data.split(":", 2)
+    if len(parts) != 3:
+        return
+    _, n_s, block_name = parts
+    try:
+        minutes = int(n_s)
+    except ValueError:
+        return
+
+    root = get_life_os_root()
+    today = date.today()
+    b = _effective_block_by_name(root, today, block_name)
+    if b is None:
+        await query.message.reply_text(
+            f"Couldn't find {block_name} in today's shape — re-run /plan."
+        )
+        return
+    pending = {
+        "op": "set", "name": b["name"],
+        "start": b["start"],
+        "end": _add_minutes(b["end"], minutes),
+    }
+    await _perform_move(query.message.reply_text, context.user_data, pending,
+                        verb=f"extended (+{minutes}m)")
 
 
 async def move_conflict_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -898,12 +1044,16 @@ async def send_checkin(block_name: str) -> None:
 # ---------------------------------------------------------------------------
 
 async def _post_init(application) -> None:
-    """Bring the in-process APScheduler up and arm today's T-5 jobs."""
+    """Bring the in-process APScheduler up, arm today's T-5 jobs, and
+    publish the command list to Telegram autocomplete."""
     global _aps_scheduler
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
     _aps_scheduler = AsyncIOScheduler()
     _aps_scheduler.start()
     await _arm_today()
+    await application.bot.set_my_commands(
+        [BotCommand(cmd, desc) for _group, cmd, desc in COMMAND_REGISTRY]
+    )
 
 
 def run_bot() -> None:
@@ -926,8 +1076,12 @@ def run_bot() -> None:
     app.add_handler(CommandHandler("skip", cmd_skip))
     app.add_handler(CommandHandler("move", cmd_move))
     app.add_handler(CommandHandler("clearday", cmd_clearday))
+    app.add_handler(CommandHandler("extend", cmd_extend))
+    app.add_handler(CommandHandler("commands", cmd_commands))
+    app.add_handler(CommandHandler("help", cmd_commands))   # familiar alias
     app.add_handler(CallbackQueryHandler(checkin_callback, pattern=r"^ci:"))
     app.add_handler(CallbackQueryHandler(skip_callback, pattern=r"^sk:"))
+    app.add_handler(CallbackQueryHandler(extend_callback, pattern=r"^ex:"))
     app.add_handler(CallbackQueryHandler(move_conflict_callback, pattern=r"^mv:"))
     app.add_handler(CallbackQueryHandler(reshuffle_choice_callback, pattern=r"^(rm|ad):"))
     logger.info("Bot starting (long-polling)...")

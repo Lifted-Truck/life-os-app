@@ -85,7 +85,9 @@ These are one-shot sends, intended to be fired by a scheduler at block times:
 | `/add` | Pin a **carried** task into the day; the day reshuffles. |
 | `/skip` | Skip a block for today (e.g. lunch). No args → tap-to-pick keyboard; tap again to restore. One-off, resets overnight. |
 | `/move <block> <HH:MM-HH:MM>` | Retime a block for today, e.g. `/move Admin 15:00-17:00`. If the edit overlaps a neighbour the bot offers **Apply as-is / Cascade / Skip neighbour / Cancel** on an inline keyboard. |
+| `/extend [N]` | Extend the in-progress block by N minutes (default 30). Routes through the same conflict menu as `/move`. Every check-in also carries **+15 / +30 / +60** buttons for one-tap extension. |
 | `/clearday` | Clear today's block edits; back to the standing day shape. |
+| `/commands` (or `/help`) | List every command, grouped by purpose. Telegram autocomplete also lists them when you type `/`. |
 | `/log [domain] <text>` | Record a completed entry in today's log (retroactive / off-schedule). A leading domain makes it count toward that cadence. |
 | `/ai <text>` | Freeform note — Haiku tags the domain and cleans it, then saves to `ingest/`. |
 | `/note [domain] <text>` | Save an ingest note; optional leading domain tag. `/note ai ...` is an alias for `/ai`. |
