@@ -185,8 +185,8 @@ def render_daily_readme_body(result: ScheduleResult, today: Optional[date] = Non
     # Today's Blocks
     lines.append("## Today's Blocks")
     lines.append("")
-    lines.append("| Time | Domain | Task | Type | Duration | Status |")
-    lines.append("|------|--------|------|------|----------|--------|")
+    lines.append("| Time | Block | Domain | Task | Type | Duration | Status |")
+    lines.append("|------|-------|--------|------|------|----------|--------|")
     for a in result.assignments:
         b = a.block
         time = f"{b['start']}–{b['end']}"
@@ -194,12 +194,15 @@ def render_daily_readme_body(result: ScheduleResult, today: Optional[date] = Non
         if a.task is not None:
             t = a.task
             lines.append(
-                f"| {time} | {t.domain or '—'} | {t.title} | {_type_label(t)} | {dur} | planned |"
+                f"| {time} | {b['name']} | {t.domain or '—'} | {t.title} | "
+                f"{_type_label(t)} | {dur} | planned |"
             )
         elif b["slot"] is None:
-            lines.append(f"| {time} | — | {b['name']} | — | {dur} | — |")
+            lines.append(f"| {time} | {b['name']} | — | — | — | {dur} | — |")
         else:
-            lines.append(f"| {time} | — | _open ({b['slot']})_ | — | {dur} | open |")
+            lines.append(
+                f"| {time} | {b['name']} | — | _open ({b['slot']})_ | — | {dur} | open |"
+            )
     lines.append("")
 
     # Non-Negotiables Today

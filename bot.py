@@ -475,17 +475,22 @@ def _now_hhmm() -> str:
 
 
 def _format_schedule(result) -> str:
-    """A plain-text day plan suitable for a Telegram message (no Markdown)."""
+    """A plain-text day plan suitable for a Telegram message (no Markdown).
+
+    Every line names the block — `/move`, `/skip`, `/extend` and the conflict
+    menus all reference blocks by name, so the plan view has to surface them
+    too or the user can't tell which row "Deep Work 1" is.
+    """
     lines = ["📋 Today's plan", ""]
     for a in result.assignments:
         b = a.block
         when = f"{b['start']}-{b['end']}"
         if a.task:
-            lines.append(f"{when}  {a.task.title}")
+            lines.append(f"{when}  {b['name']} — {a.task.title}")
         elif b["slot"] is None:
             lines.append(f"{when}  · {b['name']}")
         else:
-            lines.append(f"{when}  (open)")
+            lines.append(f"{when}  {b['name']} (open)")
     if result.carried:
         lines.append("")
         lines.append("Carried: " + ", ".join(t.title for t in result.carried))
