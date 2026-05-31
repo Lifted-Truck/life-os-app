@@ -13,6 +13,7 @@ from utils import (
 from scheduler.compile_queue import compile_to_file
 from scheduler.day import build_result, reset_state, write_daily_readme
 from scheduler.schedule import render_daily_readme_body
+from commands_doc import write_bot_commands_md
 
 load_dotenv(Path(__file__).parent / ".env", override=True)
 
@@ -79,6 +80,13 @@ def main():
 
     create_today_log(plan_body)
     print(f"Created daily/logs/{date.today().isoformat()}.md")
+
+    # Refresh the data-tree command reference (Cowork reads it).
+    try:
+        out = write_bot_commands_md(get_life_os_root())
+        print(f"Refreshed {out.relative_to(get_life_os_root())}")
+    except OSError as e:
+        print(f"Warning: could not refresh dev/bot-commands.md: {e}", file=sys.stderr)
 
     try:
         send_email(plan_body)

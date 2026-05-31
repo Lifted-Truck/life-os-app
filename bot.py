@@ -40,6 +40,7 @@ from scheduler.day import (
     toggle_drop_block,
 )
 from scheduler.day_template import load_day_template
+from commands_doc import COMMAND_REGISTRY, write_bot_commands_md
 import notifications
 
 load_dotenv(Path(__file__).parent / ".env", override=True)
@@ -75,32 +76,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 # --- /commands — chat-side command index --------------------------------
-# Single source of truth: COMMAND_REGISTRY. /commands renders the grouped
-# text; setMyCommands publishes the flat list to Telegram autocomplete so
-# typing "/" surfaces the full menu on phone.
-
-COMMAND_REGISTRY: list[tuple[str, str, str]] = [
-    # (group, command, one-line description)
-    ("Daily flow", "plan",      "Show today's plan; check-in if a block is in progress"),
-    ("Daily flow", "log",       "[domain] <what you did> — record a completed entry"),
-    ("Daily flow", "ai",        "<text> — freeform note; Haiku tags and saves it"),
-
-    ("Reshuffle",  "behind",    "Running behind — pick a scheduled task to drop"),
-    ("Reshuffle",  "add",       "Pin a carried task into the day"),
-    ("Reshuffle",  "skip",      "Skip a block for today (toggle)"),
-    ("Reshuffle",  "move",      "<block> <HH:MM-HH:MM> — retime a block for today"),
-    ("Reshuffle",  "extend",    "[N=30] — extend the in-progress block by N minutes"),
-    ("Reshuffle",  "clearday",  "Clear today's block edits"),
-
-    ("Inputs",     "note",      "[domain] <text> — save an ingest note"),
-    ("Inputs",     "edit",      "inbox <text> | threshold <d>.<f> <v>"),
-    ("Inputs",     "domain",    "list — show known domains"),
-
-    ("Misc",       "evening",   "<brief> — Haiku summarizes your evening into the log"),
-    ("Misc",       "commands",  "Show this list"),
-    ("Misc",       "start",     "Connectivity check"),
-]
-
+# Source of truth lives in commands_doc.COMMAND_REGISTRY. /commands renders
+# the grouped text below; setMyCommands publishes the flat list to Telegram
+# autocomplete; and on startup we also refresh dev/bot-commands.md in the
+# data tree so Cowork sessions see the current command surface.
 
 def _format_command_list() -> str:
     lines: list[str] = ["📖 Commands\n"]
@@ -1054,6 +1033,12 @@ async def _post_init(application) -> None:
     await application.bot.set_my_commands(
         [BotCommand(cmd, desc) for _group, cmd, desc in COMMAND_REGISTRY]
     )
+    # Mirror the command surface into the data tree so Cowork sees it.
+    try:
+        out = write_bot_commands_md(get_life_os_root())
+        logger.info("Refreshed %s", out)
+    except OSError as e:
+        logger.warning("Could not refresh dev/bot-commands.md: %s", e)
 
 
 def run_bot() -> None:
