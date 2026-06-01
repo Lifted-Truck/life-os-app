@@ -29,6 +29,7 @@ class Placement:
     min_block: Optional[int] = None       # min contiguous minutes
     window: Optional[list] = None         # ["HH:MM", "HH:MM"] or None
     energy: Optional[str] = None          # "high" | "low" | None
+    days: list = field(default_factory=list)   # R6: expanded ["mon".."sun"] subset
 
     def to_dict(self) -> dict:
         d = {"class": self.cls, "slots": list(self.slots)}
@@ -38,6 +39,8 @@ class Placement:
             d["window"] = list(self.window)
         if self.energy is not None:
             d["energy"] = self.energy
+        if self.days:
+            d["days"] = list(self.days)
         return d
 
 
@@ -142,6 +145,7 @@ class Task:
             min_block=pl.get("min-block"),
             window=pl.get("window"),
             energy=pl.get("energy"),
+            days=list(pl.get("days") or []),
         )
         return cls(
             id=d["id"],

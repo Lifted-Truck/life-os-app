@@ -28,6 +28,8 @@ from typing import Optional
 
 import yaml
 
+from .days import expand_days
+
 from .constants import (
     DEADLINE_TYPES,
     IMPORTANCE_TIERS,
@@ -166,12 +168,22 @@ def parse_tasks_text(text: str, domain: str, source_name: str = "") -> tuple[int
         for s in slots:
             if s not in SLOT_VOCAB:
                 issues.append(LintIssue("error", rloc, f"unknown slot '{s}' (controlled vocab: {SLOT_VOCAB})"))
+        days_raw = pl.get("days") or []
+        if not isinstance(days_raw, list):
+            issues.append(LintIssue("error", rloc, "placement.days is not a list"))
+            days_raw = []
+        try:
+            days = expand_days(days_raw)
+        except ValueError as e:
+            issues.append(LintIssue("error", rloc, f"placement.{e}"))
+            days = []
         placement = Placement(
             cls=cls,
             slots=[s for s in slots if s in SLOT_VOCAB],
             min_block=pl.get("min-block"),
             window=pl.get("window"),
             energy=pl.get("energy"),
+            days=days,
         )
 
         # deadline (Type 2)

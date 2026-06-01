@@ -21,6 +21,7 @@ from datetime import date
 from typing import Optional
 
 from .constants import DEFAULT_BLOCKS, IMPORTANCE_WEIGHT
+from .days import is_eligible_today, today_token
 
 
 def _to_min(hhmm: str) -> int:
@@ -115,10 +116,19 @@ def schedule(tasks: list, today: Optional[date] = None,
 
     candidates = [t for t in tasks if t.id not in exclude_ids]
 
-    # Surface ineligible tasks (blocked) and exclude waiting/ineligible from placement
+    # Surface ineligible tasks (blocked) and exclude waiting/ineligible/off-day
+    # from placement. R6: tasks whose placement.days excludes today are
+    # surfaced as `blocked: off-day` and re-emerge on a matching day.
     schedulable = []
     for t in candidates:
         if t.waiting or not t.eligible:
+            result.blocked.append(t)
+        elif not is_eligible_today(t.placement.days, today):
+            # Tag the reason in-place so the rendered output reads correctly
+            # (round-tripped fresh from queue.yaml each call — safe to mutate).
+            reason = f"off-day ({today_token(today)})"
+            t.blocked_reason = (f"{t.blocked_reason}; {reason}"
+                                if t.blocked_reason else reason)
             result.blocked.append(t)
         else:
             schedulable.append(t)

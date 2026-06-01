@@ -22,6 +22,7 @@ from typing import Optional
 import yaml
 
 from .constants import IMPORTANCE_WEIGHT, MANDATORY_WEEKLY_BOOST
+from .days import expand_days
 from .logs import (
     completions_this_week,
     done_task_ids,
@@ -43,6 +44,7 @@ THRESHOLD_DOMAIN_SLOTS = {
     "fitness": ["exercise"],
     "career": ["deep-work", "admin"],
     "meals": ["admin"],
+    "upkeep": ["admin"],   # chores cluster under Admin/Career (template.md)
 }
 
 DEFAULT_TASK4_DURATION = 60   # minutes, when unit is not "minutes"
@@ -63,18 +65,49 @@ _DUE_RE = re.compile(r"due:\s*(fixed|hard|soft)\s+(\d{4}-\d{2}-\d{2})", re.IGNOR
 
 # --- Source normalizers ----------------------------------------------------
 
-def _normalize_thresholds(thresholds: dict, lint: list) -> list:
+def _normalize_thresholds(thresholds: dict, lint: list,
+                          domain_days: dict[str, list[str]] | None = None) -> list:
+    """Normalize thresholds.yaml domains into Type 4 task records.
+
+    `as-scheduled` cadence is normally skipped (event-driven). When a
+    domain carries `days: [...]`, however, it emits a low-urgency Type 4
+    "nudge" placeable on those weekdays — the chores model. The nudge
+    never accrues cadence-debt and has importance `low`, so it falls
+    through to whatever capacity remains on its eligible days.
+    """
+    domain_days = domain_days or {}
     tasks: list = []
     for domain, cfg in (thresholds or {}).items():
         if not isinstance(cfg, dict):
             continue
         cadence = cfg.get("cadence")
-        if cadence in (None, "as-scheduled"):
-            continue  # event-driven; not auto-scheduled
+        days = domain_days.get(domain, [])
+        if cadence is None:
+            continue
         slots = THRESHOLD_DOMAIN_SLOTS.get(domain)
         if not slots:
             lint.append(LintIssue("warning", "thresholds.yaml",
                                   f"domain '{domain}' has cadence '{cadence}' but no slot mapping; skipped"))
+            continue
+        if cadence == "as-scheduled":
+            if not days:
+                continue  # truly event-driven; no auto-schedule
+            # B6: as-scheduled + days = light recurring nudge on eligible days.
+            tasks.append(Task(
+                id=f"{domain}-recurring",
+                title=f"{domain} (chores — {'/'.join(days)})",
+                type=4,
+                source="thresholds",
+                domain=domain,
+                importance="low",
+                duration=DEFAULT_TASK4_DURATION,
+                cadence="as-scheduled",
+                placement=Placement(
+                    cls="floating", slots=list(slots),
+                    min_block=min(DEFAULT_TASK4_DURATION, 30),
+                    days=list(days),
+                ),
+            ))
             continue
         unit = cfg.get("unit")
         target = cfg.get("target")
@@ -94,7 +127,10 @@ def _normalize_thresholds(thresholds: dict, lint: list) -> list:
             min=int(minv) if minv else None,
             cadence=cadence,
             mandatory_weekly=cfg.get("mandatory-weekly"),
-            placement=Placement(cls="floating", slots=list(slots), min_block=min_block),
+            placement=Placement(
+                cls="floating", slots=list(slots), min_block=min_block,
+                days=list(days),
+            ),
         ))
     return tasks
 
@@ -148,6 +184,22 @@ def compile_queue(root: Path, today: Optional[date] = None) -> tuple[list, list]
     tasks: list = []
     lint: list = []
 
+    # Read thresholds first so domain-level `days` is available for Type 3
+    # inheritance and the as-scheduled+days light-nudge path.
+    thresholds_path = root / "thresholds.yaml"
+    thresholds = {}
+    domain_days: dict[str, list[str]] = {}
+    if thresholds_path.exists():
+        thresholds = yaml.safe_load(thresholds_path.read_text(encoding="utf-8")) or {}
+        for domain, cfg in (thresholds or {}).items():
+            if not isinstance(cfg, dict) or not cfg.get("days"):
+                continue
+            try:
+                domain_days[domain] = expand_days(cfg["days"])
+            except ValueError as e:
+                lint.append(LintIssue("error", "thresholds.yaml",
+                                      f"domain '{domain}' {e}"))
+
     # Type 3 — tasks.md per domain
     domains_dir = root / "domains"
     if domains_dir.is_dir():
@@ -155,13 +207,17 @@ def compile_queue(root: Path, today: Optional[date] = None) -> tuple[list, list]
             domain = tasks_md.parent.name
             _next_id, dtasks, issues = parse_tasks_file(tasks_md, domain)
             lint.extend(issues)
+            # Inherit domain-level days when the task didn't author its own.
+            inherited = domain_days.get(domain)
+            if inherited:
+                for t in dtasks:
+                    if not t.placement.days:
+                        t.placement.days = list(inherited)
             tasks.extend(dtasks)
 
-    # Type 4 — thresholds.yaml
-    thresholds_path = root / "thresholds.yaml"
-    if thresholds_path.exists():
-        thresholds = yaml.safe_load(thresholds_path.read_text(encoding="utf-8")) or {}
-        tasks.extend(_normalize_thresholds(thresholds, lint))
+    # Type 4 — thresholds.yaml (with domain-level days passed through)
+    if thresholds:
+        tasks.extend(_normalize_thresholds(thresholds, lint, domain_days))
 
     # Type 1/2 — inbox.md
     inbox_path = root / "inbox.md"
@@ -178,7 +234,8 @@ def compile_queue(root: Path, today: Optional[date] = None) -> tuple[list, list]
         u = deadline_urgency(t.deadline, t.deadline_type, today)
         if t.type == 4:
             last = last_completion_for_domain(entries, t.domain)
-            u += cadence_debt_urgency(t.cadence, last, today)
+            u += cadence_debt_urgency(
+                t.cadence, last, today, days=t.placement.days)
             if t.mandatory_weekly and completions_this_week(entries, t.domain, today) == 0:
                 t.mandatory_due = True
                 u += MANDATORY_WEEKLY_BOOST
