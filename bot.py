@@ -159,23 +159,40 @@ async def cmd_domain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 # /note command
 # ---------------------------------------------------------------------------
 
+DEV_NOTE_KEYWORD = "dev"  # routes /note to ingest/dev/ (Dev-Note Bin)
+
+
 def _extract_domain(words: list[str], known_domains: set[str]) -> tuple[str, str]:
-    """Return (domain_tag, body). Extracts first word as domain if it matches."""
-    if words and words[0].lower() in known_domains:
+    """Return (domain_tag, body). Extracts first word as domain if it matches.
+
+    `dev` is recognized as a routing keyword even though it isn't a
+    thresholds.yaml domain — it sends the note to `ingest/dev/` for later
+    drain into `dev/TODO.md` by a Code session.
+    """
+    valid = known_domains | {DEV_NOTE_KEYWORD}
+    if words and words[0].lower() in valid:
         return words[0].lower(), " ".join(words[1:])
     return "", " ".join(words)
 
 
 async def _haiku_structure_note(text: str, known_domains: set[str]) -> tuple[str, str]:
-    """Call Haiku to extract domain and clean body from freeform text."""
-    domain_list = ", ".join(sorted(known_domains))
+    """Call Haiku to extract domain and clean body from freeform text.
+
+    `dev` is offered as a valid tag alongside the thresholds.yaml domains —
+    Haiku can route ideas about the bot/automation layer to the Dev-Note Bin.
+    """
+    valid_tags = sorted(known_domains | {DEV_NOTE_KEYWORD})
+    domain_list = ", ".join(valid_tags)
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
     message = client.messages.create(
         model=MODEL,
         max_tokens=256,
         system=(
             f"You are a note-routing assistant. Given a freeform note, extract:\n"
-            f"1. domain: the most relevant domain from this list, or blank if unclear: {domain_list}\n"
+            f"1. domain: the most relevant tag from this list, or blank if unclear: {domain_list}\n"
+            f"   Use `dev` ONLY when the note is about the user's automation layer,\n"
+            f"   the Telegram bot, scheduler engine, scripts, or build roadmap —\n"
+            f"   never for life-domain content.\n"
             f"2. body: the note content, cleaned up but faithful to the original\n\n"
             f"Return exactly two lines:\n"
             f"domain: [value or blank]\n"
@@ -190,7 +207,7 @@ async def _haiku_structure_note(text: str, known_domains: set[str]) -> tuple[str
             domain = line.split(":", 1)[1].strip()
         elif line.startswith("body:"):
             body = line.split(":", 1)[1].strip()
-    if domain not in known_domains:
+    if domain not in (known_domains | {DEV_NOTE_KEYWORD}):
         domain = ""
     return domain, body
 

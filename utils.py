@@ -79,10 +79,17 @@ def append_inbox(task_text: str) -> None:
 
 
 def write_ingest_note(domain: str, body: str) -> str:
-    """Write a bot-generated note to ingest/. Returns the filename created."""
+    """Write a bot-generated note. Returns the relative path written.
+
+    The literal token ``dev`` routes to ``ingest/dev/`` — the Dev-Note Bin
+    a Code session drains into ``dev/TODO.md``. Everything else goes to
+    ``ingest/``, which Cowork drains for life notes. The ``domain:`` field
+    still carries the literal tag (`dev` or the domain name or blank).
+    """
     now = datetime.now()
     filename = now.strftime("%Y-%m-%d-%H-%M") + ".md"
     domain_line = domain if domain else ""
+    folder = "ingest/dev" if domain == "dev" else "ingest"
     content = (
         f"source: telegram\n"
         f"date: {now.strftime('%Y-%m-%d')}\n"
@@ -91,8 +98,9 @@ def write_ingest_note(domain: str, body: str) -> str:
         f"---\n"
         f"{body}\n"
     )
-    write_file(f"ingest/{filename}", content)
-    return filename
+    rel = f"{folder}/{filename}"
+    write_file(rel, content)
+    return rel
 
 
 def append_log_entry(entry: dict) -> None:
