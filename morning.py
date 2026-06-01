@@ -10,8 +10,13 @@ from utils import (
     get_life_os_root,
     write_file,
 )
-from scheduler.compile_queue import compile_to_file
-from scheduler.day import build_result, reset_state, write_daily_readme
+from scheduler.compile_queue import compile_to_file, load_queue
+from scheduler.day import (
+    build_result, reset_state, write_daily_readme,
+    write_daily_readme_from_body,
+)
+from scheduler.goals import render_goals_readme_body, render_goals_text
+from scheduler.mode import load_mode
 from scheduler.schedule import render_daily_readme_body
 from commands_doc import write_bot_commands_md
 
@@ -29,10 +34,8 @@ def generate_plan() -> str:
     root = get_life_os_root()
     today = date.today()
 
-    tasks, lint = compile_to_file(root, today)
+    _tasks_compiled, lint = compile_to_file(root, today)
     reset_state(root, today)                       # fresh day: clear drops/boosts
-    result, _state = build_result(root, today)
-    write_daily_readme(root, result, today)
 
     errors = [i for i in lint if i.level == "error"]
     if errors:
@@ -40,6 +43,17 @@ def generate_plan() -> str:
         for i in errors:
             print(f"  [{i.where}] {i.message}", file=sys.stderr)
 
+    mode = load_mode(root)
+    if mode["plan_mode"] == "goals":
+        # Goals mode: no placement. Read queue and render the flat list.
+        queue_tasks, _l, _g = load_queue(root)
+        body = render_goals_readme_body(queue_tasks, today)
+        write_daily_readme_from_body(root, body, today)
+        # The email body is the plain-text goals view.
+        return render_goals_text(queue_tasks, today)
+
+    result, _state = build_result(root, today)
+    write_daily_readme(root, result, today)
     return render_daily_readme_body(result, today)
 
 

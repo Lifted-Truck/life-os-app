@@ -3,7 +3,7 @@ import asyncio
 import logging
 import os
 import sys
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import anthropic
@@ -40,6 +40,9 @@ from scheduler.day import (
     toggle_drop_block,
 )
 from scheduler.day_template import load_day_template
+from scheduler.compile_queue import load_queue
+from scheduler.mode import load_mode, set_haiku_phrasing, set_plan_mode, VALID_PLAN_MODES
+from scheduler.goals import render_goals_readme_body, render_goals_text, split_goals
 from commands_doc import COMMAND_REGISTRY, write_bot_commands_md
 import notifications
 
@@ -96,6 +99,85 @@ async def cmd_commands(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not is_authorized(update):
         return
     await update.message.reply_text(_format_command_list())
+
+
+# --- /mode — plan mode + Haiku-phrasing flag ----------------------------
+# `plan_mode` switches /plan and morning.py between the timed block schedule
+# (`blocks` — default, current behaviour) and the untimed goals list
+# (`goals` — for the logging experiment). `haiku_phrasing` is opt-in
+# wording-only polish in goals mode; it never changes which goals are live,
+# their order, or reminder times.
+
+MODE_HELP = (
+    "Usage:\n"
+    "  /mode                  — show current mode\n"
+    "  /mode blocks           — switch to the timed block schedule (default)\n"
+    "  /mode goals            — switch to the flat untimed goals list\n"
+    "  /mode haiku on|off     — toggle Haiku wording pass for goals mode"
+)
+
+
+async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_authorized(update):
+        return
+    args = [a.lower() for a in (context.args or [])]
+    root = get_life_os_root()
+
+    if not args:
+        m = load_mode(root)
+        await update.message.reply_text(
+            f"plan_mode: {m['plan_mode']}\nhaiku_phrasing: {m['haiku_phrasing']}\n\n"
+            + MODE_HELP
+        )
+        return
+
+    if args[0] in VALID_PLAN_MODES:
+        m = set_plan_mode(root, args[0])
+        await _arm_today()   # reminders depend on mode
+        await update.message.reply_text(f"plan_mode → {m['plan_mode']}.")
+        return
+
+    if args[0] == "haiku" and len(args) >= 2 and args[1] in ("on", "off"):
+        m = set_haiku_phrasing(root, args[1] == "on")
+        await update.message.reply_text(f"haiku_phrasing → {m['haiku_phrasing']}.")
+        return
+
+    await update.message.reply_text(MODE_HELP)
+
+
+async def _haiku_phrase_goals(text: str) -> str:
+    """Wording-only pass on the goals output.
+
+    The deterministic core has already picked WHICH goals are live, in WHAT
+    order, and grouped them by domain. Haiku is constrained to rephrase the
+    lines for warmth/concision — it cannot add, remove, reorder, or
+    re-group anything. If anything looks off, the original text is returned.
+    """
+    try:
+        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        msg = client.messages.create(
+            model=MODEL,
+            max_tokens=512,
+            system=(
+                "You are rephrasing a goals list for a personal log app. The "
+                "structure (headers, domain groupings, bullets, order) is "
+                "FIXED — do not add, remove, reorder, regroup, or rename "
+                "items. You may only rephrase the goal *body text* (after the "
+                "bullet) for concision/warmth. Keep dates, times, domain "
+                "names, anchor names, and any 'cadence' words verbatim. "
+                "Return ONLY the rephrased plan, same line structure."
+            ),
+            messages=[{"role": "user", "content": text}],
+        )
+        out = msg.content[0].text.strip()
+        # Defensive: if Haiku returns something wildly different in length
+        # or drops the header, fall back to the deterministic original.
+        if not out or abs(len(out) - len(text)) > len(text):
+            return text
+        return out
+    except Exception as e:
+        logger.warning("Haiku phrasing pass failed: %s", e)
+        return text
 
 
 async def cmd_evening(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -487,7 +569,6 @@ def _checkin_keyboard(block_name: str) -> InlineKeyboardMarkup:
 
 
 def _now_hhmm() -> str:
-    from datetime import datetime
     return datetime.now().strftime("%H:%M")
 
 
@@ -533,6 +614,23 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     root = get_life_os_root()
     today = date.today()
+    mode = load_mode(root)
+
+    if mode["plan_mode"] == "goals":
+        # Goals mode: flat untimed list. Read queue directly — no placement.
+        tasks, _lint, _gen = load_queue(root)
+        text = render_goals_text(tasks, today)
+        if mode["haiku_phrasing"]:
+            text = await _haiku_phrase_goals(text)
+        # Mirror the goals view into daily/README.md (for the morning email).
+        body = render_goals_readme_body(tasks, today)
+        from scheduler.day import write_daily_readme_from_body
+        write_daily_readme_from_body(root, body, today)
+        await _arm_today()
+        await update.message.reply_text(text)
+        return
+
+    # Blocks mode (the default): timed schedule + check-in for in-progress block.
     result = reshuffle_and_write(root, today)
     await _arm_today()
 
@@ -572,19 +670,214 @@ async def cmd_behind(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     )
 
 
+# --- /add — anchored event creator (default) + /add queue (legacy pin) ----
+# /add <event> @<time> [mm/dd[/yy]]
+#   → append a Type 2 line to inbox.md and schedule a one-shot T-5 reminder.
+# /add queue
+#   → original behaviour: pick a carried task by number to pin into today.
+
+ADD_USAGE = (
+    "Usage:\n"
+    "  /add <event> @<time> [mm/dd[/yy]]  — anchored event with T-5 reminder\n"
+    "    e.g. /add Dentist @3pm 6/15\n"
+    "         /add Call mom @19:30\n"
+    "         /add Run @7am\n"
+    "  /add queue                          — pin a carried task into today"
+)
+
+
+def _parse_event_time(token: str):
+    """'@3pm' / '@15:00' / '@9' / '@9:30pm' → 'HH:MM' or None."""
+    t = token.strip().lower()
+    if not t.startswith("@"):
+        return None
+    t = t[1:]
+    suffix = None
+    if t.endswith("am") or t.endswith("pm"):
+        suffix = t[-2:]
+        t = t[:-2].strip()
+    if ":" in t:
+        try:
+            h_s, m_s = t.split(":", 1)
+            h, m = int(h_s), int(m_s)
+        except ValueError:
+            return None
+    else:
+        try:
+            h, m = int(t), 0
+        except ValueError:
+            return None
+    if suffix == "pm" and h < 12:
+        h += 12
+    elif suffix == "am" and h == 12:
+        h = 0
+    if not (0 <= h < 24 and 0 <= m < 60):
+        return None
+    return f"{h:02d}:{m:02d}"
+
+
+def _parse_event_date(token: str, today: date):
+    """'6/15' / '6/15/27' / '06/15/2027' → date, or None."""
+    if "/" not in token:
+        return None
+    parts = token.split("/")
+    if len(parts) not in (2, 3):
+        return None
+    try:
+        m_n = int(parts[0])
+        d_n = int(parts[1])
+    except ValueError:
+        return None
+    if len(parts) == 3:
+        try:
+            y_n = int(parts[2])
+        except ValueError:
+            return None
+        if y_n < 100:
+            y_n += 2000
+    else:
+        y_n = today.year
+    try:
+        return date(y_n, m_n, d_n)
+    except ValueError:
+        return None
+
+
+def _schedule_event_reminder(event: str, event_dt: datetime,
+                             lead_min: int = notifications.NOTIFY_LEAD_MIN) -> bool:
+    """Add a one-shot APScheduler job at event_dt - lead_min. Returns success."""
+    if _aps_scheduler is None:
+        return False
+    fire_at = event_dt - timedelta(minutes=lead_min)
+    if fire_at <= datetime.now():
+        return False
+    _aps_scheduler.add_job(
+        send_notify, "date", run_date=fire_at, args=[event],
+        id=f"nf:{fire_at:%Y%m%dT%H%M}:{event[:40]}",
+        replace_existing=True,
+    )
+    return True
+
+
+def _format_event_inbox_line(event: str, event_date: date, hhmm: str) -> str:
+    """Type 2 anchored event in the dated-inbox format Cowork documented."""
+    return f"{event} | due: fixed {event_date.month}/{event_date.day} | at: {hhmm}"
+
+
+async def _save_event(update_or_query, event: str, event_date: date,
+                      hhmm: str) -> None:
+    """Append the event to inbox.md, schedule the T-5 ping, confirm to the user."""
+    append_inbox(_format_event_inbox_line(event, event_date, hhmm))
+    h, m = hhmm.split(":")
+    event_dt = datetime.combine(event_date, datetime.min.time()).replace(
+        hour=int(h), minute=int(m))
+    scheduled = _schedule_event_reminder(event, event_dt)
+    when_str = f"{event_date.isoformat()} {hhmm}"
+    lead = notifications.NOTIFY_LEAD_MIN
+    if scheduled:
+        confirm = f"✅ Anchored: {event} @ {when_str}\nReminder set for T-{lead}m."
+    else:
+        confirm = (
+            f"✅ Anchored: {event} @ {when_str}\n"
+            f"(Time has already passed — no reminder scheduled.)"
+        )
+    # Works for both Message and CallbackQuery surfaces.
+    if hasattr(update_or_query, "message") and update_or_query.message:
+        await update_or_query.message.reply_text(confirm)
+    else:
+        await update_or_query.edit_message_text(confirm)
+
+
 async def cmd_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_authorized(update):
         return
-    root = get_life_os_root()
-    result, _state = build_result(root, date.today())
-    items = [(t.id, t.title) for t in result.carried]
-    if not items:
-        await update.message.reply_text("Nothing carried — every eligible task is already placed.")
+    args = context.args or []
+
+    # /add queue → original pin-from-carried behaviour
+    if args and args[0].lower() == "queue":
+        root = get_life_os_root()
+        result, _state = build_result(root, date.today())
+        items = [(t.id, t.title) for t in result.carried]
+        if not items:
+            await update.message.reply_text(
+                "Nothing carried — every eligible task is already placed.")
+            return
+        await update.message.reply_text(
+            "➕ Which task should I pin into the day?",
+            reply_markup=_numbered_keyboard(items, "ad"),
+        )
         return
-    await update.message.reply_text(
-        "➕ Which task should I pin into the day?",
-        reply_markup=_numbered_keyboard(items, "ad"),
-    )
+
+    # /add <event> @<time> [date] → anchored event
+    if not args:
+        await update.message.reply_text(ADD_USAGE)
+        return
+
+    today = date.today()
+    parsed_time = None
+    parsed_date = None
+    event_words: list[str] = []
+    for a in args:
+        if parsed_time is None and a.startswith("@"):
+            t = _parse_event_time(a)
+            if t is not None:
+                parsed_time = t
+                continue
+        if parsed_date is None and "/" in a:
+            d = _parse_event_date(a, today)
+            if d is not None:
+                parsed_date = d
+                continue
+        event_words.append(a)
+
+    if parsed_time is None or not event_words:
+        await update.message.reply_text(ADD_USAGE)
+        return
+    event = " ".join(event_words)
+
+    # No date + time already passed → confirm tomorrow vs today
+    if parsed_date is None:
+        now_hhmm = _now_hhmm()
+        if parsed_time <= now_hhmm:
+            context.user_data["pending_event"] = (event, parsed_time)
+            tomorrow = today + timedelta(days=1)
+            kb = InlineKeyboardMarkup([[
+                InlineKeyboardButton(
+                    f"Today {today.month}/{today.day}", callback_data="ev:today"),
+                InlineKeyboardButton(
+                    f"Tomorrow {tomorrow.month}/{tomorrow.day}",
+                    callback_data="ev:tomorrow"),
+                InlineKeyboardButton("Cancel", callback_data="ev:cancel"),
+            ]])
+            await update.message.reply_text(
+                f"{event} @ {parsed_time} — that time has already passed today. "
+                f"Which day?",
+                reply_markup=kb,
+            )
+            return
+        parsed_date = today
+
+    await _save_event(update, event, parsed_date, parsed_time)
+
+
+async def event_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the today/tomorrow/cancel prompt from /add when no date was given."""
+    query = update.callback_query
+    if query.message.chat.id != get_chat_id():
+        return
+    await query.answer()
+    _, _, choice = query.data.partition(":")
+    pending = context.user_data.pop("pending_event", None)
+    if not pending and choice != "cancel":
+        await query.edit_message_text("That prompt expired. Re-run /add.")
+        return
+    if choice == "cancel":
+        await query.edit_message_text("Cancelled. No event saved.")
+        return
+    event, hhmm = pending
+    today = date.today()
+    event_date = today if choice == "today" else today + timedelta(days=1)
+    await _save_event(query, event, event_date, hhmm)
 
 
 # --- Manual block reshuffle (drop / retime the day's structure for today) ---
@@ -1086,9 +1379,11 @@ def run_bot() -> None:
     app.add_handler(CommandHandler("extend", cmd_extend))
     app.add_handler(CommandHandler("commands", cmd_commands))
     app.add_handler(CommandHandler("help", cmd_commands))   # familiar alias
+    app.add_handler(CommandHandler("mode", cmd_mode))
     app.add_handler(CallbackQueryHandler(checkin_callback, pattern=r"^ci:"))
     app.add_handler(CallbackQueryHandler(skip_callback, pattern=r"^sk:"))
     app.add_handler(CallbackQueryHandler(extend_callback, pattern=r"^ex:"))
+    app.add_handler(CallbackQueryHandler(event_confirm_callback, pattern=r"^ev:"))
     app.add_handler(CallbackQueryHandler(move_conflict_callback, pattern=r"^mv:"))
     app.add_handler(CallbackQueryHandler(reshuffle_choice_callback, pattern=r"^(rm|ad):"))
     logger.info("Bot starting (long-polling)...")

@@ -255,6 +255,18 @@ def write_daily_readme(root: Path, result, today: Optional[date] = None) -> None
     (root / "daily" / "README.md").write_text(content, encoding="utf-8")
 
 
+def write_daily_readme_from_body(root: Path, body: str,
+                                 today: Optional[date] = None) -> None:
+    """Write daily/README.md from a pre-rendered body (used for goals mode)."""
+    today = today or date.today()
+    content = DAILY_README_TEMPLATE.format(
+        date=today.isoformat(),
+        generated=datetime.now().strftime("%H:%M"),
+        body=body,
+    )
+    (root / "daily" / "README.md").write_text(content, encoding="utf-8")
+
+
 def reshuffle_and_write(root: Path, today: Optional[date] = None):
     """Rebuild the plan from current state and rewrite daily/README.md."""
     today = today or date.today()

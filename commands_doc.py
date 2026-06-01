@@ -25,7 +25,7 @@ COMMAND_REGISTRY: list[tuple[str, str, str]] = [
     ("Daily flow", "ai",        "<text> — freeform note; Haiku tags and saves it"),
 
     ("Reshuffle",  "behind",    "Running behind — pick a scheduled task to drop"),
-    ("Reshuffle",  "add",       "Pin a carried task into the day"),
+    ("Reshuffle",  "add",       "<event> @<time> [date] — anchored event w/ reminder; /add queue pins a carried task"),
     ("Reshuffle",  "skip",      "Skip a block for today (toggle)"),
     ("Reshuffle",  "move",      "<block> <HH:MM-HH:MM> — retime a block for today"),
     ("Reshuffle",  "extend",    "[N=30] — extend the in-progress block by N minutes"),
@@ -36,6 +36,7 @@ COMMAND_REGISTRY: list[tuple[str, str, str]] = [
     ("Inputs",     "domain",    "list — show known domains"),
 
     ("Misc",       "evening",   "<brief> — Haiku summarizes your evening into the log"),
+    ("Misc",       "mode",      "Show or switch plan mode (blocks | goals); /mode haiku on|off"),
     ("Misc",       "commands",  "Show this list"),
     ("Misc",       "start",     "Connectivity check"),
 ]
