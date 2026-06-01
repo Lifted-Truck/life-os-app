@@ -93,7 +93,11 @@ def parse_blocks(data) -> list[dict]:
                 f"block {name!r} has unknown slot {slot!r} "
                 f"(allowed: {', '.join(SLOT_VOCAB)})"
             )
-        blocks.append({"name": name, "start": start, "end": end, "slot": slot})
+        immutable = bool(b.get("immutable", False))   # R5 — default false
+        blocks.append({
+            "name": name, "start": start, "end": end,
+            "slot": slot, "immutable": immutable,
+        })
 
     blocks.sort(key=lambda x: x["start"])
     return blocks

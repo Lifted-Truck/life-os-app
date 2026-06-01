@@ -35,6 +35,7 @@ from scheduler.day import (
     resolve_block,
     save_state,
     set_block_time,
+    shift_day_edits,
     skip_conflict_edits,
     task_in_block,
     toggle_drop_block,
@@ -1217,6 +1218,110 @@ async def move_conflict_callback(update: Update, context: ContextTypes.DEFAULT_T
     await query.edit_message_text(f"🗓 {pending['name']} {verb}. Plan updated.")
 
 
+# --- /shift [N] — cascade the whole day forward by N minutes -----------
+# R5: blocks flagged `immutable: true` in template.yaml are stepped over.
+# When no template block is immutable (v1 default) /shift just slides the
+# entire skeleton from now-forward; the collision menu is dormant but built.
+
+async def cmd_shift(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_authorized(update):
+        return
+    args = context.args or []
+    try:
+        minutes = int(args[0]) if args else 30
+    except ValueError:
+        await update.message.reply_text("Usage: /shift [minutes]  (default 30)")
+        return
+    if minutes <= 0 or minutes > 240:
+        await update.message.reply_text(
+            "Pick a shift between 1 and 240 minutes."
+        )
+        return
+
+    root = get_life_os_root()
+    today = date.today()
+    state = load_state(root, today)
+    template, _ = load_day_template(root)
+    edits, collisions = shift_day_edits(
+        template, state.get("block_edits", []), minutes, _now_hhmm())
+
+    if not edits:
+        await update.message.reply_text(
+            "Nothing left in the day to shift — the remaining blocks are "
+            "already in progress or past."
+        )
+        return
+
+    summary = ", ".join(
+        f"{e['name']}→{e['start']}–{e['end']}" for e in edits
+    )
+
+    if not collisions:
+        # Apply directly.
+        state.setdefault("block_edits", []).extend(edits)
+        save_state(root, state)
+        reshuffle_and_write(root, today)
+        await _arm_today()
+        await update.message.reply_text(
+            f"🗓 Shifted +{minutes}m: {summary}. Plan updated."
+        )
+        return
+
+    # Collision with one or more immutable blocks — surface the conflict menu.
+    context.user_data["pending_shift"] = {
+        "edits": edits,
+        "minutes": minutes,
+        "collisions": collisions,
+    }
+    text = (
+        f"⚠ /shift +{minutes}m collides with immutable block(s): "
+        f"{', '.join(collisions)}.\n\n"
+        f"Options:\n"
+        f"• Apply as-is — shift would overlap the immutable\n"
+        f"• Skip immutable — drop the immutable(s) for today and apply\n"
+        f"• Cancel"
+    )
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("Apply as-is", callback_data="sh:apply"),
+        InlineKeyboardButton("Skip immutable", callback_data="sh:skip"),
+        InlineKeyboardButton("Cancel", callback_data="sh:cancel"),
+    ]])
+    await update.message.reply_text(text, reply_markup=kb)
+
+
+async def shift_conflict_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the /shift conflict menu (sh:apply | sh:skip | sh:cancel)."""
+    query = update.callback_query
+    if query.message.chat.id != get_chat_id():
+        return
+    await query.answer()
+    _, _, choice = query.data.partition(":")
+    pending = context.user_data.pop("pending_shift", None)
+    if not pending and choice != "cancel":
+        await query.edit_message_text("That prompt expired. Re-run /shift.")
+        return
+    if choice == "cancel":
+        await query.edit_message_text("Cancelled. No shift applied.")
+        return
+
+    root = get_life_os_root()
+    today = date.today()
+    state = load_state(root, today)
+    edits_to_add = list(pending["edits"])
+    if choice == "skip":
+        for name in pending["collisions"]:
+            edits_to_add.append({"op": "drop", "name": name})
+    state.setdefault("block_edits", []).extend(edits_to_add)
+    save_state(root, state)
+    reshuffle_and_write(root, today)
+    await _arm_today()
+
+    verb = "applied with overlap" if choice == "apply" else "applied; immutable(s) dropped"
+    await query.edit_message_text(
+        f"🗓 Shift +{pending['minutes']}m {verb}. Plan updated."
+    )
+
+
 async def cmd_clearday(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/clearday — drop all of today's one-off block edits."""
     if not is_authorized(update):
@@ -1376,6 +1481,7 @@ def run_bot() -> None:
     app.add_handler(CommandHandler("skip", cmd_skip))
     app.add_handler(CommandHandler("move", cmd_move))
     app.add_handler(CommandHandler("clearday", cmd_clearday))
+    app.add_handler(CommandHandler("shift", cmd_shift))
     app.add_handler(CommandHandler("extend", cmd_extend))
     app.add_handler(CommandHandler("commands", cmd_commands))
     app.add_handler(CommandHandler("help", cmd_commands))   # familiar alias
@@ -1384,6 +1490,7 @@ def run_bot() -> None:
     app.add_handler(CallbackQueryHandler(skip_callback, pattern=r"^sk:"))
     app.add_handler(CallbackQueryHandler(extend_callback, pattern=r"^ex:"))
     app.add_handler(CallbackQueryHandler(event_confirm_callback, pattern=r"^ev:"))
+    app.add_handler(CallbackQueryHandler(shift_conflict_callback, pattern=r"^sh:"))
     app.add_handler(CallbackQueryHandler(move_conflict_callback, pattern=r"^mv:"))
     app.add_handler(CallbackQueryHandler(reshuffle_choice_callback, pattern=r"^(rm|ad):"))
     logger.info("Bot starting (long-polling)...")

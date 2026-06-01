@@ -29,6 +29,7 @@ COMMAND_REGISTRY: list[tuple[str, str, str]] = [
     ("Reshuffle",  "skip",      "Skip a block for today (toggle)"),
     ("Reshuffle",  "move",      "<block> <HH:MM-HH:MM> — retime a block for today"),
     ("Reshuffle",  "extend",    "[N=30] — extend the in-progress block by N minutes"),
+    ("Reshuffle",  "shift",     "[N=30] — push the rest of the day forward by N minutes"),
     ("Reshuffle",  "clearday",  "Clear today's block edits"),
 
     ("Inputs",     "note",      "[domain] <text> — save an ingest note"),

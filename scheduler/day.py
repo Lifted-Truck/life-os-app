@@ -176,6 +176,50 @@ def cascade_shift_edits(template_blocks: list[dict],
     return edits, ran_past
 
 
+def shift_day_edits(template_blocks: list[dict],
+                    current_edits: list,
+                    minutes: int,
+                    now_hhmm: str) -> tuple[list[dict], list[str]]:
+    """Generate `set` edits for /shift [N] — push the whole day forward.
+
+    R5 semantics:
+      • Blocks whose start is BEFORE now are left untouched (the past doesn't
+        get to move).
+      • Blocks flagged `immutable: true` are stepped over.
+      • Every other block shifts start/end forward by N minutes (capped at
+        23:59 so we never spill past midnight).
+
+    Returns (edits, immutable_collision_names) where immutable_collision_names
+    lists immutables whose clock window is now overlapped by a shifted block —
+    the caller can surface those via the conflict menu.
+    """
+    blocks = apply_block_edits(template_blocks, current_edits)
+    edits: list[dict] = []
+    shifted_windows: list[tuple[str, str, str]] = []   # (name, new_start, new_end)
+    for b in blocks:
+        if b.get("immutable", False):
+            continue
+        if b["start"] < now_hhmm:
+            continue
+        new_start = _from_min(_to_min(b["start"]) + minutes)
+        new_end = _from_min(_to_min(b["end"]) + minutes)
+        edits.append({"op": "set", "name": b["name"],
+                      "start": new_start, "end": new_end})
+        shifted_windows.append((b["name"], new_start, new_end))
+
+    # Detect collisions: any immutable block whose window overlaps any shifted
+    # block's NEW window.
+    immutables = [b for b in blocks if b.get("immutable", False)]
+    collisions: set[str] = set()
+    for im in immutables:
+        im_s, im_e = _to_min(im["start"]), _to_min(im["end"])
+        for _name, s, e in shifted_windows:
+            if _to_min(s) < im_e and im_s < _to_min(e):
+                collisions.add(im["name"])
+                break
+    return edits, sorted(collisions)
+
+
 def skip_conflict_edits(template_blocks: list[dict],
                         pending_edit: dict) -> list[dict]:
     """Edits that apply the move plus drop every block it directly collides with."""
