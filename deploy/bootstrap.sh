@@ -79,11 +79,15 @@ if ! id -u "${DEPLOY_USER}" >/dev/null 2>&1; then
     adduser --disabled-password --gecos "" "${DEPLOY_USER}"
 fi
 usermod -aG sudo "${DEPLOY_USER}"
-# Passwordless sudo for life-os service commands only (keeps the rest password-locked).
-cat > /etc/sudoers.d/life-os <<'EOF'
-life ALL=(root) NOPASSWD: /bin/systemctl restart life-os-bot, /bin/systemctl restart life-os-dashboard, /bin/systemctl restart caddy, /bin/systemctl reload caddy
+# The deploy user is created with --disabled-password, so the default
+# %sudo policy (prompts for the user's own password) is unusable. Grant
+# passwordless sudo on this single-tenant VPS so install-services.sh and
+# Day-2 ops (deploy/restart) work non-interactively. Tighten if this VPS
+# ever stops being single-tenant.
+cat > /etc/sudoers.d/life-passwordless <<'EOF'
+life ALL=(ALL) NOPASSWD:ALL
 EOF
-chmod 0440 /etc/sudoers.d/life-os
+chmod 0440 /etc/sudoers.d/life-passwordless
 
 echo "==> [5/7] Installing your SSH key for ${DEPLOY_USER}..."
 mkdir -p "/home/${DEPLOY_USER}/.ssh"
