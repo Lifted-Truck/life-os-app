@@ -1,0 +1,10 @@
+[Unit]
+Description=Pull Life-OS data tree every few minutes
+
+[Timer]
+# Two minutes after boot, then every 5 minutes after the last completion.
+OnBootSec=2min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

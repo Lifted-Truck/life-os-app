@@ -1,0 +1,16 @@
+[Unit]
+Description=Pull Life-OS data tree from origin (fast-forward only)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=life
+Group=life
+WorkingDirectory=/home/life/data
+ExecStart=/usr/bin/git pull --ff-only --quiet
+# Non-fatal: a divergent local commit will fail ff-only; the push timer
+# resolves that on its next run. Don't mark the unit failed for it.
+SuccessExitStatus=0 1
+
+NoNewPrivileges=true
+PrivateTmp=true

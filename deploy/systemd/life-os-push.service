@@ -1,0 +1,17 @@
+[Unit]
+Description=Push Life-OS data tree changes back to origin
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=life
+Group=life
+WorkingDirectory=/home/life/data
+# Commit any dirty changes (bot-written: ingest/, daily/logs/, schedule/*,
+# inbox.md, thresholds.yaml value updates) under a generic "bot" author
+# so the user can see what changed from where. Skip if there are none.
+ExecStart=/bin/bash -c 'git diff --quiet && git diff --cached --quiet || (git add -A && git -c user.name="life-os-bot" -c user.email="bot@mindlathe.xyz" commit -m "bot: $(date -u +%FT%TZ) — automated write" && git push --quiet)'
+SuccessExitStatus=0 1
+
+NoNewPrivileges=true
+PrivateTmp=true

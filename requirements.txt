@@ -4,6 +4,8 @@ pyyaml
 resend
 python-dotenv
 apscheduler>=3.10
+fastapi>=0.110
+uvicorn[standard]>=0.27
 
 # dev/test only
 pytest

@@ -1,0 +1,36 @@
+#
+# Caddyfile — Life-OS web reverse proxy + automatic HTTPS.
+#
+# `__DOMAIN__` is replaced at install time by deploy/install-services.sh.
+# Caddy provisions a Let's Encrypt cert automatically once DNS resolves to
+# this server.
+#
+
+# Redirect www → apex.
+www.__DOMAIN__ {
+    redir https://__DOMAIN__{uri} permanent
+}
+
+# Main site — reverse-proxy to the FastAPI dashboard on localhost:8000.
+__DOMAIN__ {
+    encode gzip zstd
+
+    # Healthcheck endpoint is unauthenticated; everything else can grow auth later.
+    reverse_proxy localhost:8000
+
+    log {
+        output file /var/log/caddy/access.log {
+            roll_size 10mb
+            roll_keep 10
+        }
+        format console
+    }
+
+    # Standard hardening headers.
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options    "nosniff"
+        Referrer-Policy           "strict-origin-when-cross-origin"
+        -Server
+    }
+}
