@@ -2,6 +2,9 @@
 Description=Life-OS Telegram bot (long-poll)
 After=network-online.target
 Wants=network-online.target
+# Restart-storm guard (must be in [Unit], not [Service], on systemd v229+).
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -12,9 +15,6 @@ EnvironmentFile=/home/life/app/.env
 ExecStart=/home/life/app/venv/bin/python bot.py
 Restart=on-failure
 RestartSec=5
-# Don't restart-storm if the bot crashes on startup repeatedly.
-StartLimitIntervalSec=60
-StartLimitBurst=5
 
 # Hardening
 NoNewPrivileges=true
