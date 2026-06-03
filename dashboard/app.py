@@ -30,8 +30,25 @@ app = FastAPI(
 
 @app.get("/health")
 def health() -> dict:
-    """Unauthenticated probe Caddy / Ionos can hit. Returns 200 if the app is up."""
-    return {"status": "ok"}
+    """Unauthenticated probe Caddy / Ionos can hit. Returns 200 if the app is up.
+
+    Carries the build revision so an auto-deploy can be verified end-to-end
+    by polling /health and watching `rev` change after a push.
+    """
+    return {"status": "ok", "rev": _read_rev()}
+
+
+def _read_rev() -> str:
+    """Best-effort: short git SHA of the currently-running checkout."""
+    try:
+        head = Path(__file__).resolve().parent.parent / ".git" / "HEAD"
+        ref = head.read_text(encoding="utf-8").strip()
+        if ref.startswith("ref: "):
+            ref_path = Path(__file__).resolve().parent.parent / ".git" / ref[5:]
+            return ref_path.read_text(encoding="utf-8").strip()[:8]
+        return ref[:8]
+    except OSError:
+        return "unknown"
 
 
 @app.get("/")
