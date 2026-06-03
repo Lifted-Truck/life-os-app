@@ -21,7 +21,8 @@ from pathlib import Path
 # (group, command, one-line description). Group order determines doc order.
 COMMAND_REGISTRY: list[tuple[str, str, str]] = [
     ("Daily flow", "plan",      "Show today's plan; check-in if a block is in progress"),
-    ("Daily flow", "log",       "[domain] <what you did> — record a completed entry"),
+    ("Daily flow", "log",       "[domain] <what you did> — record a completed entry (clears recurring Type 4)"),
+    ("Daily flow", "done",      "Pick a one-shot task to mark done (Type 1/2/3); recurring uses /log"),
     ("Daily flow", "ai",        "<text> — freeform note; Haiku tags and saves it"),
 
     ("Reshuffle",  "behind",    "Running behind — pick a scheduled task to drop"),

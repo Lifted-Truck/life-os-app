@@ -19,6 +19,7 @@ from telegram.ext import (
 from utils import (
     append_inbox,
     append_log_entry,
+    check_inbox_item,
     get_life_os_root,
     read_file,
     read_thresholds,
@@ -654,6 +655,91 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
     else:
         await update.message.reply_text(text)
+
+
+# --- /done — mark a Type-1/2/3 task done; recurring Type-4 uses /log -----
+# For tasks.md items: writes a log entry with `task: <id>` and `outcome: done`
+# so the scheduler stops surfacing it. For inbox items: rewrites the
+# `- [ ]` line to `- [x]` in inbox.md (compile_queue treats checked items
+# as out of queue). Recurring Type 4 entries are excluded — those clear
+# via /log <domain> <what>.
+
+async def cmd_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_authorized(update):
+        return
+    root = get_life_os_root()
+    tasks, _lint, _gen = load_queue(root)
+    candidates = [
+        t for t in tasks
+        if t.type != 4 and t.eligible and not t.waiting
+    ]
+    if not candidates:
+        await update.message.reply_text(
+            "No live one-shot tasks to mark done.\n"
+            "Recurring tasks clear via /log <domain> <what you did>."
+        )
+        return
+    # Sort by urgency desc (already-computed in queue.yaml), break ties on title
+    candidates.sort(key=lambda t: (-t.urgency, t.title.lower()))
+    capped = candidates[:10]
+    items = [(t.id, t.title[:40]) for t in capped]
+    note = ""
+    if len(candidates) > len(capped):
+        note = f"\n(Showing top {len(capped)} of {len(candidates)} by urgency.)"
+    await update.message.reply_text(
+        "Which task should I mark done?" + note,
+        reply_markup=_numbered_keyboard(items, "dn"),
+    )
+
+
+async def done_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle a tap from the /done numbered keyboard (dn:<task-id>)."""
+    query = update.callback_query
+    if query.message.chat.id != get_chat_id():
+        return
+    await query.answer()
+    _, _, task_id = query.data.partition(":")
+    if not task_id:
+        return
+
+    root = get_life_os_root()
+    today = date.today()
+    tasks, _lint, _gen = load_queue(root)
+    task = next((t for t in tasks if t.id == task_id), None)
+    if task is None:
+        await query.edit_message_text(
+            f"Task {task_id} is no longer in the queue (already done, or "
+            f"the queue was recompiled). Re-run /done."
+        )
+        return
+
+    if task.source == "inbox":
+        ok = check_inbox_item(task.id)
+        if not ok:
+            await query.edit_message_text(
+                f"Couldn't find {task.title!r} in inbox.md (it may already "
+                f"be checked off). Re-run /done."
+            )
+            return
+        message = f"✅ Marked done in inbox: {task.title}"
+    else:
+        # Type 1 (inbox-source already handled above) / Type 2 (anchored,
+        # generally inbox-source too) / Type 3 (domain tasks.md)
+        entry = {
+            "date": today.isoformat(),
+            "covered": task.title,
+            "outcome": "done",
+            "task": task.id,
+        }
+        if task.domain:
+            entry["domain"] = task.domain
+        append_log_entry(entry)
+        message = f"✅ Logged done: {task.title} ({task.id})"
+
+    # Rebuild today's plan so the user sees the result immediately
+    reshuffle_and_write(root, today)
+    await _arm_today()
+    await query.edit_message_text(message + ". Plan updated.")
 
 
 async def cmd_behind(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1476,6 +1562,7 @@ def run_bot() -> None:
     app.add_handler(CommandHandler("edit", cmd_edit))
     app.add_handler(CommandHandler("domain", cmd_domain))
     app.add_handler(CommandHandler("plan", cmd_plan))
+    app.add_handler(CommandHandler("done", cmd_done))
     app.add_handler(CommandHandler("behind", cmd_behind))
     app.add_handler(CommandHandler("add", cmd_add))
     app.add_handler(CommandHandler("skip", cmd_skip))
@@ -1491,6 +1578,7 @@ def run_bot() -> None:
     app.add_handler(CallbackQueryHandler(extend_callback, pattern=r"^ex:"))
     app.add_handler(CallbackQueryHandler(event_confirm_callback, pattern=r"^ev:"))
     app.add_handler(CallbackQueryHandler(shift_conflict_callback, pattern=r"^sh:"))
+    app.add_handler(CallbackQueryHandler(done_callback, pattern=r"^dn:"))
     app.add_handler(CallbackQueryHandler(move_conflict_callback, pattern=r"^mv:"))
     app.add_handler(CallbackQueryHandler(reshuffle_choice_callback, pattern=r"^(rm|ad):"))
     logger.info("Bot starting (long-polling)...")

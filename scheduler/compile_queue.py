@@ -59,7 +59,12 @@ QUEUE_HEADER = """\
 # DOMAIN-FORMAT.md section 7. `urgency` and `eligible` are computed here.
 """
 
-_INBOX_LINE_RE = re.compile(r"^- \[[ xX]\]\s*(.+)$")
+# Only OPEN inbox items become live tasks. Checking `- [x]` marks an item
+# done — both `/done` (bot) and a hand edit in inbox.md make it skip the
+# queue. The numbering (`inbox-NNN`) counts only open items in parse order;
+# checking one off renumbers subsequent items at next compile, which is
+# fine because the IDs aren't referenced from elsewhere.
+_INBOX_LINE_RE = re.compile(r"^- \[ \]\s*(.+)$")
 _DUE_RE = re.compile(r"due:\s*(fixed|hard|soft)\s+(\d{4}-\d{2}-\d{2})", re.IGNORECASE)
 
 

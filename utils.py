@@ -78,6 +78,49 @@ def append_inbox(task_text: str) -> None:
     append_to_file("inbox.md", f"- [ ] {task_text}\n")
 
 
+def check_inbox_item(inbox_id: str) -> bool:
+    """Mark the n-th open inbox.md item as done by switching `- [ ]` to `- [x]`.
+
+    `inbox_id` is the queue.yaml id (``inbox-NNN``); N is 1-based and counts
+    only OPEN items in parse order — matching compile_queue's numbering.
+    Returns True if a line was rewritten, False if N is out of range.
+
+    Preserves the original line content (deadline, waiting fields, etc.).
+    Idempotent: rerunning on an already-checked item is a no-op (different
+    item now occupies that index, or we simply hit end of file).
+    """
+    try:
+        n_target = int(str(inbox_id).rsplit("-", 1)[-1])
+    except ValueError:
+        return False
+    root = get_life_os_root()
+    path = root / "inbox.md"
+    if not path.exists():
+        return False
+    original = path.read_text(encoding="utf-8")
+    n = 0
+    out_lines: list[str] = []
+    matched = False
+    for line in original.splitlines():
+        if not matched:
+            stripped = line.lstrip()
+            if stripped.startswith("- [ ]"):
+                n += 1
+                if n == n_target:
+                    indent = line[: len(line) - len(stripped)]
+                    rest = stripped[len("- [ ]") :]
+                    line = f"{indent}- [x]{rest}"
+                    matched = True
+        out_lines.append(line)
+    if not matched:
+        return False
+    new_text = "\n".join(out_lines)
+    if original.endswith("\n") and not new_text.endswith("\n"):
+        new_text += "\n"
+    path.write_text(new_text, encoding="utf-8")
+    return True
+
+
 def write_ingest_note(domain: str, body: str) -> str:
     """Write a bot-generated note. Returns the relative path written.
 
