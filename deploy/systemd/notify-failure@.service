@@ -1,0 +1,12 @@
+[Unit]
+Description=Send Telegram notification for failed unit %i
+# No OnFailure here — Telegram outage shouldn't cascade into a loop.
+
+[Service]
+Type=oneshot
+# Run as root so we can read the bot's .env (chmod 600 by life) and pull
+# the failed unit's journal (needs adm/systemd-journal or root).
+ExecStart=/bin/bash /home/life/app/deploy/bin/notify-failure.sh %i
+
+# A failed notification shouldn't make systemd retry forever.
+SuccessExitStatus=0 1 2

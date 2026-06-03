@@ -5,6 +5,8 @@ Wants=network-online.target
 # Restart-storm guard (must be in [Unit], not [Service], on systemd v229+).
 StartLimitIntervalSec=60
 StartLimitBurst=5
+# Telegram me when the bot gives up (after StartLimitBurst exhausts).
+OnFailure=notify-failure@%n.service
 
 [Service]
 Type=simple

@@ -1,6 +1,7 @@
 [Unit]
 Description=Pull Life-OS data tree from origin (fast-forward only)
 After=network-online.target
+OnFailure=notify-failure@%n.service
 
 [Service]
 Type=oneshot

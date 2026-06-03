@@ -2,6 +2,7 @@
 Description=Life-OS dashboard (FastAPI behind Caddy)
 After=network-online.target
 Wants=network-online.target
+OnFailure=notify-failure@%n.service
 
 [Service]
 Type=simple

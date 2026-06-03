@@ -2,6 +2,7 @@
 Description=Life-OS morning briefing (compile + email + dev/bot-commands.md refresh)
 After=life-os-pull.service network-online.target
 Wants=life-os-pull.service
+OnFailure=notify-failure@%n.service
 
 [Service]
 Type=oneshot

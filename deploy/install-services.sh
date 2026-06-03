@@ -41,6 +41,7 @@ sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-pull.service"       /etc/sys
 sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-pull.timer"         /etc/systemd/system/
 sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-push.service"       /etc/systemd/system/
 sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-push.timer"         /etc/systemd/system/
+sudo install -m 0644 "${DEPLOY_DIR}/systemd/notify-failure@.service"    /etc/systemd/system/
 
 echo "==> Installing Caddyfile for ${DOMAIN}..."
 # Render the Caddyfile template by substituting the domain.
