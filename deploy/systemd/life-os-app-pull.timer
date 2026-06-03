@@ -1,0 +1,11 @@
+[Unit]
+Description=Poll life-os-app origin for new commits every minute
+
+[Timer]
+# 1-minute cadence. GitHub public-repo fetches at this rate are well within
+# their per-IP soft limits; tune up if you ever see fetch errors.
+OnBootSec=3min
+OnUnitActiveSec=1min
+
+[Install]
+WantedBy=timers.target

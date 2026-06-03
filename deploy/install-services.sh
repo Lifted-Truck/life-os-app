@@ -41,6 +41,8 @@ sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-pull.service"       /etc/sys
 sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-pull.timer"         /etc/systemd/system/
 sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-push.service"       /etc/systemd/system/
 sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-push.timer"         /etc/systemd/system/
+sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-app-pull.service"   /etc/systemd/system/
+sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-app-pull.timer"     /etc/systemd/system/
 sudo install -m 0644 "${DEPLOY_DIR}/systemd/notify-failure@.service"    /etc/systemd/system/
 
 echo "==> Installing Caddyfile for ${DOMAIN}..."
@@ -55,6 +57,7 @@ echo "==> Enabling + starting services..."
 sudo systemctl enable --now life-os-pull.timer
 sudo systemctl enable --now life-os-push.timer
 sudo systemctl enable --now life-os-morning.timer
+sudo systemctl enable --now life-os-app-pull.timer
 sudo systemctl enable --now life-os-dashboard.service
 sudo systemctl enable --now life-os-bot.service
 
