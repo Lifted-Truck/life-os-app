@@ -131,6 +131,42 @@ def test_check_by_title_no_match_returns_false(tmp_path, monkeypatch):
     assert utils.check_inbox_item_by_title("not present") is False
 
 
+# --- goals output respects today's done log entries -----------------------
+
+def test_goals_view_excludes_today_done(life_os):
+    """The integration cmd_plan/morning.py do: filter queue by done_ids_today."""
+    from datetime import date
+    from scheduler.compile_queue import compile_to_file
+    from scheduler.day import done_ids_today
+    from scheduler.goals import render_goals_text
+    from scheduler.compile_queue import load_queue
+
+    today = date(2026, 6, 1)
+    # Seed inbox.md with one item so queue has an inbox task
+    (life_os / "inbox.md").write_text(
+        "- [ ] Pick up dry cleaning\n", encoding="utf-8")
+    compile_to_file(life_os, today)
+
+    tasks, _l, _g = load_queue(life_os)
+    inbox_task = next(t for t in tasks if t.source == "inbox")
+
+    # Simulate /done writing a log entry referencing the inbox task id
+    (life_os / "daily" / "logs" / f"{today.isoformat()}.md").write_text(
+        f"## {today.isoformat()}\n\n"
+        f"- **outcome:** done\n"
+        f"- **task:** {inbox_task.id}\n",
+        encoding="utf-8",
+    )
+
+    done = done_ids_today(life_os, today)
+    assert inbox_task.id in done
+
+    # The done-filter is what cmd_plan + morning.py apply
+    filtered = [t for t in tasks if t.id not in done]
+    text = render_goals_text(filtered, today)
+    assert "Pick up dry cleaning" not in text
+
+
 # --- end-to-end: check an item, parser drops it -----------------------------
 
 def test_check_then_normalize_removes_item(tmp_path, monkeypatch):

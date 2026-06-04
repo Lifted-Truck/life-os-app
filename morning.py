@@ -12,7 +12,7 @@ from utils import (
 )
 from scheduler.compile_queue import compile_to_file, load_queue
 from scheduler.day import (
-    build_result, reset_state, write_daily_readme,
+    build_result, done_ids_today, load_state, reset_state, write_daily_readme,
     write_daily_readme_from_body,
 )
 from scheduler.goals import render_goals_readme_body, render_goals_text
@@ -46,7 +46,12 @@ def generate_plan() -> str:
     mode = load_mode(root)
     if mode["plan_mode"] == "goals":
         # Goals mode: no placement. Read queue and render the flat list.
+        # Filter today's done items + drops (same as cmd_plan's goals branch).
         queue_tasks, _l, _g = load_queue(root)
+        done = done_ids_today(root, today)
+        dropped = set(load_state(root, today).get("dropped", []))
+        queue_tasks = [t for t in queue_tasks
+                       if t.id not in done and t.id not in dropped]
         body = render_goals_readme_body(queue_tasks, today)
         write_daily_readme_from_body(root, body, today)
         # The email body is the plain-text goals view.

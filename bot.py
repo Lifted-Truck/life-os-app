@@ -31,6 +31,7 @@ from scheduler.day import (
     apply_block_edits,
     build_result,
     cascade_shift_edits,
+    done_ids_today,
     find_overlaps,
     load_state,
     reshuffle_and_write,
@@ -621,7 +622,13 @@ async def cmd_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if mode["plan_mode"] == "goals":
         # Goals mode: flat untimed list. Read queue directly — no placement.
+        # Filter by today's done log entries (and per-day drops) so /done
+        # immediately removes items from the displayed list — same exclusion
+        # blocks-mode already gets through schedule()'s `excluded` set.
         tasks, _lint, _gen = load_queue(root)
+        done = done_ids_today(root, today)
+        dropped = set(load_state(root, today).get("dropped", []))
+        tasks = [t for t in tasks if t.id not in done and t.id not in dropped]
         text = render_goals_text(tasks, today)
         if mode["haiku_phrasing"]:
             text = await _haiku_phrase_goals(text)
@@ -727,6 +734,15 @@ async def done_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 f"Re-run /done to refresh."
             )
             return
+        # ALSO write a log entry so today's plan immediately excludes it via
+        # done_ids_today — without this the stale queue.yaml keeps showing
+        # the item until next morning's recompile.
+        append_log_entry({
+            "date": today.isoformat(),
+            "covered": task.title,
+            "outcome": "done",
+            "task": task.id,
+        })
         message = f"✅ Marked done in inbox: {task.title}"
     else:
         # Type 3 (domain tasks.md) — write a log entry referencing the task id.
