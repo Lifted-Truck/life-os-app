@@ -547,12 +547,23 @@ async def checkin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 # and explicit per-block relocation are deferred to v2 (see dev/TODO.md).
 
 
-def _numbered_keyboard(items: list[tuple[str, str]], prefix: str) -> InlineKeyboardMarkup:
-    """Build a numbered inline keyboard. items = [(task_id, label), ...]."""
+def _numbered_keyboard(items: list[tuple[str, str]], prefix: str,
+                       *, with_cancel: bool = False) -> InlineKeyboardMarkup:
+    """Build a numbered inline keyboard. items = [(task_id, label), ...].
+
+    With ``with_cancel=True`` appends a final '❌ Cancel' row whose
+    callback_data is ``<prefix>:cancel`` — the prefix's callback handler
+    must recognise this payload and treat it as a no-op exit. The
+    inline-keyboard wizard pattern (R7 plan) extends this.
+    """
     rows = [
         [InlineKeyboardButton(f"{i}. {label}", callback_data=f"{prefix}:{tid}")]
         for i, (tid, label) in enumerate(items, 1)
     ]
+    if with_cancel:
+        rows.append([
+            InlineKeyboardButton("❌ Cancel", callback_data=f"{prefix}:cancel")
+        ])
     return InlineKeyboardMarkup(rows)
 
 
@@ -700,19 +711,23 @@ async def cmd_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         note = f"\n(Showing top {len(capped)} of {len(candidates)} by urgency.)"
     await update.message.reply_text(
         "Which task should I mark done?" + note,
-        reply_markup=_numbered_keyboard(items, "dn"),
+        reply_markup=_numbered_keyboard(items, "dn", with_cancel=True),
     )
 
 
 async def done_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle a tap from the /done numbered keyboard (dn:<index>)."""
+    """Handle a tap from the /done keyboard (dn:<index> or dn:cancel)."""
     query = update.callback_query
     if query.message.chat.id != get_chat_id():
         return
     await query.answer()
-    _, _, idx_s = query.data.partition(":")
+    _, _, payload = query.data.partition(":")
+    if payload == "cancel":
+        context.user_data.pop("pending_done", None)
+        await query.edit_message_text("Cancelled. No task marked done.")
+        return
     try:
-        idx = int(idx_s)
+        idx = int(payload)
     except ValueError:
         return
     pending = context.user_data.get("pending_done") or []
