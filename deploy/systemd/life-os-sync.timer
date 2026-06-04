@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Life-OS data-tree sync every 5 min
+
+[Timer]
+# Two minutes after boot, then every 5 minutes after the last completion.
+# Replaces both life-os-pull.timer and life-os-push.timer — the single
+# service serializes the cycle, eliminating the inter-timer race.
+OnBootSec=2min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

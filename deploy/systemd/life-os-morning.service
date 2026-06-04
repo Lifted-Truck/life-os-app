@@ -1,8 +1,11 @@
 [Unit]
 Description=Life-OS morning briefing (compile + email + dev/bot-commands.md refresh)
-After=life-os-pull.service network-online.target
-Wants=life-os-pull.service
+After=life-os-sync.service network-online.target
 OnFailure=notify-failure@%n.service
+# Don't `Wants=life-os-sync.service` — sync runs every 5 min already, so
+# the data is at most 5 min stale at the 06:00 morning fire. Avoiding the
+# strong dep keeps morning resilient if sync is paused/disabled for any
+# reason.
 
 [Service]
 Type=oneshot

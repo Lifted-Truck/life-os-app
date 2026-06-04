@@ -1,0 +1,14 @@
+[Unit]
+Description=Atomic Life-OS data-tree sync (commit + pull + push)
+After=network-online.target
+OnFailure=notify-failure@%n.service
+
+[Service]
+Type=oneshot
+User=life
+Group=life
+WorkingDirectory=/home/life/data
+ExecStart=/bin/bash /home/life/app/deploy/bin/sync-data-tree.sh
+
+NoNewPrivileges=true
+PrivateTmp=true

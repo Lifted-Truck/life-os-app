@@ -66,7 +66,13 @@ fi
 # units added later. Don't restart oneshot services / timers explicitly;
 # next fire picks up the new config. Bot + dashboard get restarted in
 # step 6 below, which applies any new config to them.
-SYSTEMD_CHANGED=$(echo "$CHANGED" | grep -E '^deploy/systemd/.*\.(service|timer)$' || true)
+#
+# diff-filter=AM ensures we only try to install files that ACTUALLY EXIST
+# in the new tree (Added or Modified) — `git diff --name-only` without a
+# filter would also list Deleted files, and `install` would fail trying
+# to read a missing source. Retired units need explicit cleanup via
+# `bash deploy/install-services.sh` (which disables + removes them).
+SYSTEMD_CHANGED=$(git diff --name-only --diff-filter=AM "$LOCAL..$REMOTE" | grep -E '^deploy/systemd/.*\.(service|timer)$' || true)
 if [[ -n "$SYSTEMD_CHANGED" ]]; then
     echo "installing changed systemd units..."
     while IFS= read -r f; do

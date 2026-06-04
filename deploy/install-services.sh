@@ -37,13 +37,25 @@ sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-bot.service"        /etc/sys
 sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-dashboard.service"  /etc/systemd/system/
 sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-morning.service"    /etc/systemd/system/
 sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-morning.timer"      /etc/systemd/system/
-sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-pull.service"       /etc/systemd/system/
-sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-pull.timer"         /etc/systemd/system/
-sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-push.service"       /etc/systemd/system/
-sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-push.timer"         /etc/systemd/system/
+sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-sync.service"       /etc/systemd/system/
+sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-sync.timer"         /etc/systemd/system/
 sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-app-pull.service"   /etc/systemd/system/
 sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-app-pull.timer"     /etc/systemd/system/
 sudo install -m 0644 "${DEPLOY_DIR}/systemd/notify-failure@.service"    /etc/systemd/system/
+
+# Retire the old two-timer design if it's still active (migration step —
+# safe to re-run; will be a no-op once retired).
+for old in life-os-pull.timer life-os-push.timer; do
+    if sudo systemctl is-enabled --quiet "$old" 2>/dev/null; then
+        echo "==> Retiring old timer: $old"
+        sudo systemctl disable --now "$old"
+    fi
+done
+for old in life-os-pull.service life-os-pull.timer life-os-push.service life-os-push.timer; do
+    if [[ -e "/etc/systemd/system/$old" ]]; then
+        sudo rm -f "/etc/systemd/system/$old"
+    fi
+done
 
 echo "==> Installing Caddyfile for ${DOMAIN}..."
 # Render the Caddyfile template by substituting the domain.
@@ -54,8 +66,7 @@ sudo systemctl daemon-reload
 sudo systemctl reload caddy
 
 echo "==> Enabling + starting services..."
-sudo systemctl enable --now life-os-pull.timer
-sudo systemctl enable --now life-os-push.timer
+sudo systemctl enable --now life-os-sync.timer
 sudo systemctl enable --now life-os-morning.timer
 sudo systemctl enable --now life-os-app-pull.timer
 sudo systemctl enable --now life-os-dashboard.service
