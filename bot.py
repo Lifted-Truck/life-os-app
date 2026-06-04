@@ -20,6 +20,7 @@ from utils import (
     append_inbox,
     append_log_entry,
     check_inbox_item,
+    check_inbox_item_by_title,
     get_life_os_root,
     read_file,
     read_thresholds,
@@ -682,7 +683,11 @@ async def cmd_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Sort by urgency desc (already-computed in queue.yaml), break ties on title
     candidates.sort(key=lambda t: (-t.urgency, t.title.lower()))
     capped = candidates[:10]
-    items = [(t.id, t.title[:40]) for t in capped]
+    # Stash the full Task objects in user_data, indexed by display position.
+    # Callbacks then operate on the *displayed* task, not a stale queue lookup
+    # — robust to queue.yaml ↔ inbox.md numbering drift.
+    context.user_data["pending_done"] = capped
+    items = [(str(i), t.title[:40]) for i, t in enumerate(capped)]
     note = ""
     if len(candidates) > len(capped):
         note = f"\n(Showing top {len(capped)} of {len(candidates)} by urgency.)"
@@ -693,38 +698,38 @@ async def cmd_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def done_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle a tap from the /done numbered keyboard (dn:<task-id>)."""
+    """Handle a tap from the /done numbered keyboard (dn:<index>)."""
     query = update.callback_query
     if query.message.chat.id != get_chat_id():
         return
     await query.answer()
-    _, _, task_id = query.data.partition(":")
-    if not task_id:
+    _, _, idx_s = query.data.partition(":")
+    try:
+        idx = int(idx_s)
+    except ValueError:
         return
+    pending = context.user_data.get("pending_done") or []
+    if idx < 0 or idx >= len(pending):
+        await query.edit_message_text("That prompt expired. Re-run /done.")
+        return
+    task = pending[idx]
 
     root = get_life_os_root()
     today = date.today()
-    tasks, _lint, _gen = load_queue(root)
-    task = next((t for t in tasks if t.id == task_id), None)
-    if task is None:
-        await query.edit_message_text(
-            f"Task {task_id} is no longer in the queue (already done, or "
-            f"the queue was recompiled). Re-run /done."
-        )
-        return
 
     if task.source == "inbox":
-        ok = check_inbox_item(task.id)
+        # Title-match path — robust to queue/parser numbering drift.
+        ok = check_inbox_item_by_title(task.title)
         if not ok:
             await query.edit_message_text(
-                f"Couldn't find {task.title!r} in inbox.md (it may already "
-                f"be checked off). Re-run /done."
+                f"Couldn't find {task.title!r} in inbox.md (likely already "
+                f"checked off, or inbox.md was edited since /done was sent). "
+                f"Re-run /done to refresh."
             )
             return
         message = f"✅ Marked done in inbox: {task.title}"
     else:
-        # Type 1 (inbox-source already handled above) / Type 2 (anchored,
-        # generally inbox-source too) / Type 3 (domain tasks.md)
+        # Type 3 (domain tasks.md) — write a log entry referencing the task id.
         entry = {
             "date": today.isoformat(),
             "covered": task.title,
@@ -736,6 +741,7 @@ async def done_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         append_log_entry(entry)
         message = f"✅ Logged done: {task.title} ({task.id})"
 
+    context.user_data.pop("pending_done", None)
     # Rebuild today's plan so the user sees the result immediately
     reshuffle_and_write(root, today)
     await _arm_today()

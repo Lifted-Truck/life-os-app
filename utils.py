@@ -78,6 +78,43 @@ def append_inbox(task_text: str) -> None:
     append_to_file("inbox.md", f"- [ ] {task_text}\n")
 
 
+def check_inbox_item_by_title(title: str) -> bool:
+    """Mark the FIRST open inbox.md line containing `title` as done.
+
+    Used by /done as the robust path: queue.yaml's inbox-NNN ids can drift
+    out of sync with the parser when a stale queue and a new parser
+    coexist, so matching by title is safer. Title is matched against the
+    line's BODY (everything after `- [ ]`), case-sensitive substring.
+    """
+    if not title:
+        return False
+    root = get_life_os_root()
+    path = root / "inbox.md"
+    if not path.exists():
+        return False
+    original = path.read_text(encoding="utf-8")
+    out_lines: list[str] = []
+    matched = False
+    for line in original.splitlines():
+        if not matched:
+            stripped = line.lstrip()
+            if stripped.startswith("- [ ]"):
+                body = stripped[len("- [ ]") :].strip()
+                if title in body:
+                    indent = line[: len(line) - len(stripped)]
+                    rest = stripped[len("- [ ]") :]
+                    line = f"{indent}- [x]{rest}"
+                    matched = True
+        out_lines.append(line)
+    if not matched:
+        return False
+    new_text = "\n".join(out_lines)
+    if original.endswith("\n") and not new_text.endswith("\n"):
+        new_text += "\n"
+    path.write_text(new_text, encoding="utf-8")
+    return True
+
+
 def check_inbox_item(inbox_id: str) -> bool:
     """Mark the n-th open inbox.md item as done by switching `- [ ]` to `- [x]`.
 

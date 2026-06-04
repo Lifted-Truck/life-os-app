@@ -96,6 +96,41 @@ def test_check_inbox_item_handles_missing_file(tmp_path, monkeypatch):
     assert utils.check_inbox_item("inbox-001") is False
 
 
+# --- check_inbox_item_by_title --------------------------------------------
+
+def test_check_by_title_marks_first_match(tmp_path, monkeypatch):
+    monkeypatch.setenv("LIFE_OS_ROOT", str(tmp_path))
+    _write_inbox(tmp_path, "- [ ] Pick up dry cleaning\n- [ ] File taxes\n")
+    assert utils.check_inbox_item_by_title("Pick up dry cleaning") is True
+    text = (tmp_path / "inbox.md").read_text(encoding="utf-8")
+    assert text.startswith("- [x] Pick up dry cleaning\n")
+
+
+def test_check_by_title_substring_match(tmp_path, monkeypatch):
+    monkeypatch.setenv("LIFE_OS_ROOT", str(tmp_path))
+    _write_inbox(tmp_path, "- [ ] File taxes | due: hard 2026-06-15\n")
+    # The Task.title is just "File taxes" (pipe-fields stripped by parser).
+    assert utils.check_inbox_item_by_title("File taxes") is True
+
+
+def test_check_by_title_skips_already_checked(tmp_path, monkeypatch):
+    monkeypatch.setenv("LIFE_OS_ROOT", str(tmp_path))
+    _write_inbox(
+        tmp_path,
+        "- [x] Pick up dry cleaning\n- [ ] Pick up dry cleaning\n",
+    )
+    # The first OPEN matching line is the second (second [ ] line wins).
+    assert utils.check_inbox_item_by_title("Pick up dry cleaning") is True
+    text = (tmp_path / "inbox.md").read_text(encoding="utf-8")
+    assert text == "- [x] Pick up dry cleaning\n- [x] Pick up dry cleaning\n"
+
+
+def test_check_by_title_no_match_returns_false(tmp_path, monkeypatch):
+    monkeypatch.setenv("LIFE_OS_ROOT", str(tmp_path))
+    _write_inbox(tmp_path, "- [ ] something else\n")
+    assert utils.check_inbox_item_by_title("not present") is False
+
+
 # --- end-to-end: check an item, parser drops it -----------------------------
 
 def test_check_then_normalize_removes_item(tmp_path, monkeypatch):

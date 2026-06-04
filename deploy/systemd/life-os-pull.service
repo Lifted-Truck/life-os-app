@@ -8,7 +8,11 @@ Type=oneshot
 User=life
 Group=life
 WorkingDirectory=/home/life/data
-ExecStart=/usr/bin/git pull --ff-only --quiet
+ExecStart=/usr/bin/git pull --ff-only --autostash --quiet
+# --autostash handles the race where a bot write happens between pull
+# cycles: stash, ff-pull, pop. Without it, pull aborts on dirty tree
+# and Telegram alerts fire. With it, the next push picks up the stashed
+# changes as normal dirty state.
 # Non-fatal: a divergent local commit will fail ff-only; the push timer
 # resolves that on its next run. Don't mark the unit failed for it.
 SuccessExitStatus=0 1
