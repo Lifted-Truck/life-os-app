@@ -8,13 +8,16 @@ Type=oneshot
 User=life
 Group=life
 WorkingDirectory=/home/life/data
-ExecStart=/usr/bin/git pull --ff-only --autostash --quiet
-# --autostash handles the race where a bot write happens between pull
-# cycles: stash, ff-pull, pop. Without it, pull aborts on dirty tree
-# and Telegram alerts fire. With it, the next push picks up the stashed
-# changes as normal dirty state.
-# Non-fatal: a divergent local commit will fail ff-only; the push timer
-# resolves that on its next run. Don't mark the unit failed for it.
+ExecStart=/usr/bin/git pull --rebase --autostash --quiet
+# --rebase + --autostash handles BOTH races at once:
+#   - dirty tree (bot mid-write):  autostash → pull → pop
+#   - divergent local commits     (push timer made commits since last
+#     successful pull, while origin advanced):  rebase replays them on
+#     top of origin's tip
+# --ff-only was too strict — it refused both cases and triggered the
+# OnFailure alert. After two real-world failures (2026-06-04 14:25 and
+# 15:40) the wider tolerance is the right tradeoff for this single-
+# tenant box.
 SuccessExitStatus=0 1
 
 NoNewPrivileges=true
