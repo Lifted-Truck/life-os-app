@@ -1536,10 +1536,29 @@ async def _arm_today() -> int:
     return armed
 
 
+def _block_span_label(block_name: str) -> str:
+    """'until 11:30 (120 min)' for a known block, or '' if not a template block.
+
+    Looks up today's effective block (template + edits) so /move and /extend
+    are reflected. Anchored Type-2 events (goals mode) aren't template blocks,
+    so they get no span line — graceful empty string.
+    """
+    block = _effective_block_by_name(get_life_os_root(), date.today(), block_name)
+    if not block:
+        return ""
+    def _mins(hhmm: str) -> int:
+        h, m = hhmm.split(":")
+        return int(h) * 60 + int(m)
+    dur = _mins(block["end"]) - _mins(block["start"])
+    return f"until {block['end']} ({dur} min)"
+
+
 async def send_notify(block_name: str) -> None:
     bot = Bot(token=os.getenv("TELEGRAM_BOT_TOKEN"))
     task = _get_block_task(block_name)
-    text = f"🕐 *{block_name}* is starting."
+    span = _block_span_label(block_name)
+    text = f"🕐 *{block_name}* is starting"
+    text += f" — {span}." if span else "."
     if task:
         text += f"\nTask: {task}"
     async with bot:
