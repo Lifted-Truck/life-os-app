@@ -1,13 +1,18 @@
-"""Minimal Life-OS dashboard — placeholder served behind Caddy on the VPS.
+"""Life-OS web hub — server-rendered FastAPI dashboard behind Caddy on the VPS.
 
-This is the *first* HTTP surface. It exists to:
-  1. Verify the Caddy + Let's Encrypt + reverse-proxy stack works end-to-end.
-  2. Give the bot somewhere to grow toward (webhook endpoints, status pages).
+Phase 1: a read-only hub across four surfaces — Today, Domains, Logs, System —
+plus the original JSON API (moved under ``/api/*``) and an unauthenticated
+``/health`` probe.
 
-It serves today's plan as JSON, plus a /health probe Caddy and Ionos can hit
-without authentication. Authenticated endpoints require an
-``Authorization: Bearer <LIFE_OS_DASHBOARD_TOKEN>`` header; if the env var
-is unset, auth is disabled (local dev / first-boot grace).
+Two auth surfaces share one secret (``LIFE_OS_DASHBOARD_TOKEN``):
+  * Browser pages use a login form → signed session cookie (a browser can't send
+    an ``Authorization`` header on navigation).
+  * ``/api/*`` keeps the header-based ``Authorization: Bearer <token>`` flow for
+    programmatic callers.
+If the token env var is unset, BOTH are disabled (local dev / first-boot grace).
+
+Governing principle (unchanged): AI may interpret language; AI may NOT make
+scheduling decisions. This hub only reads — no AI anywhere in it.
 """
 from __future__ import annotations
 
@@ -16,127 +21,341 @@ import os
 from datetime import date
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+import markdown as _md
+from fastapi import Depends, FastAPI, Form, Header, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
 
+from commands_doc import COMMAND_REGISTRY
 from scheduler.compile_queue import load_queue
 from scheduler.day import build_result
 from scheduler.day_template import load_day_template
 from scheduler.goals import split_goals
+from scheduler.logs import (
+    completions_this_week,
+    last_completion_for_domain,
+    read_log_entries,
+)
 from scheduler.mode import load_mode
-from utils import get_life_os_root
+from scheduler.tasks_parser import parse_tasks_file
+from scheduler.urgency import cadence_debt_urgency
+from utils import get_life_os_root, read_thresholds
+
+BASE = Path(__file__).resolve().parent
+templates = Jinja2Templates(directory=str(BASE / "templates"))
 
 
-# Read once at module-load — restart picks up changes (which auto-deploy does
-# on every code push, and a manual `systemctl restart life-os-dashboard`
-# picks up .env-only changes).
-DASHBOARD_TOKEN = os.getenv("LIFE_OS_DASHBOARD_TOKEN", "").strip()
+# --- auth ------------------------------------------------------------------
+
+def _token() -> str:
+    """Current dashboard token, read live so .env changes need only a restart."""
+    return os.getenv("LIFE_OS_DASHBOARD_TOKEN", "").strip()
 
 
 def require_token(authorization: str | None = Header(default=None)) -> None:
-    """FastAPI dependency: enforce Authorization: Bearer <token>.
-
-    Constant-time compare against LIFE_OS_DASHBOARD_TOKEN. If the env var is
-    unset/empty, auth is disabled — keeps local dev and first-boot working
-    without ceremony. Production: set the env var on the VPS.
-    """
-    if not DASHBOARD_TOKEN:
+    """Header-based gate for /api/* — Authorization: Bearer <token>."""
+    expected = _token()
+    if not expected:
         return
-    expected = f"Bearer {DASHBOARD_TOKEN}"
-    if not authorization or not hmac.compare_digest(authorization, expected):
+    if not authorization or not hmac.compare_digest(authorization, f"Bearer {expected}"):
         raise HTTPException(
             status_code=401,
             detail="missing or invalid Authorization header",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+
+class _NotAuthenticated(Exception):
+    """Raised by require_session so the handler can redirect to /login."""
+
+
+def require_session(request: Request) -> None:
+    """Cookie-session gate for HTML pages. Token unset → disabled (grace)."""
+    if not _token():
+        return
+    if not request.session.get("auth"):
+        raise _NotAuthenticated()
+
+
 app = FastAPI(
     title="Life-OS",
-    description="Personal automation layer — bot + scheduler + dashboard.",
-    version="0.1.0",
+    description="Personal automation layer — bot + scheduler + web hub.",
+    version="0.2.0",
 )
+# Stable signing secret across restarts so cookies survive deploys. Falls back
+# to a dev value when the token is unset (auth disabled anyway in that case).
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=_token() or "life-os-dev-insecure-secret",
+    same_site="lax",
+)
+app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
 
+
+@app.exception_handler(_NotAuthenticated)
+async def _login_redirect(request: Request, exc: _NotAuthenticated):
+    return RedirectResponse("/login", status_code=303)
+
+
+# --- small helpers ---------------------------------------------------------
+
+def _safe_read(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _render_md(text: str | None) -> str | None:
+    """Render markdown → HTML. Single-tenant own content; not sanitized."""
+    if text is None:
+        return None
+    return _md.markdown(text, extensions=["tables", "fenced_code"])
+
+
+def _domain_names(root: Path) -> set[str]:
+    names = {k for k in read_thresholds() if k != "config"}
+    ddir = root / "domains"
+    if ddir.is_dir():
+        names |= {p.name for p in ddir.iterdir() if p.is_dir()}
+    return names
+
+
+def _group_by_domain(tasks: list) -> list[tuple[str, list]]:
+    """Preserve incoming (urgency) order; group consecutive-by-domain."""
+    groups: list[tuple[str, list]] = []
+    index: dict[str, int] = {}
+    for t in tasks:
+        d = t.domain or "—"
+        if d not in index:
+            index[d] = len(groups)
+            groups.append((d, []))
+        groups[index[d]][1].append(t)
+    return groups
+
+
+# --- health (unauthenticated; auto-deploy polls its rev) -------------------
 
 @app.get("/health")
 def health() -> dict:
-    """Unauthenticated probe Caddy / Ionos can hit. Returns 200 if the app is up.
-
-    Carries the build revision so an auto-deploy can be verified end-to-end
-    by polling /health and watching `rev` change after a push.
-    """
     return {"status": "ok", "rev": _read_rev()}
 
 
 def _read_rev() -> str:
-    """Best-effort: short git SHA of the currently-running checkout."""
+    """Best-effort short git SHA of the running checkout."""
     try:
-        head = Path(__file__).resolve().parent.parent / ".git" / "HEAD"
+        head = BASE.parent / ".git" / "HEAD"
         ref = head.read_text(encoding="utf-8").strip()
         if ref.startswith("ref: "):
-            ref_path = Path(__file__).resolve().parent.parent / ".git" / ref[5:]
-            return ref_path.read_text(encoding="utf-8").strip()[:8]
+            return (BASE.parent / ".git" / ref[5:]).read_text(encoding="utf-8").strip()[:8]
         return ref[:8]
     except OSError:
         return "unknown"
 
 
-@app.get("/", dependencies=[Depends(require_token)])
-def index() -> dict:
-    """Top-level state — today's mode and a one-line summary."""
-    root = get_life_os_root()
-    today = date.today()
-    mode = load_mode(root)
-    return {
-        "app": "Life-OS",
-        "date": today.isoformat(),
-        "plan_mode": mode["plan_mode"],
-        "haiku_phrasing": mode["haiku_phrasing"],
-        "links": ["/today", "/health"],
-    }
+# --- login / logout --------------------------------------------------------
+
+@app.get("/login", response_class=HTMLResponse)
+def login_form(request: Request):
+    if not _token() or request.session.get("auth"):
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(request, "login.html", {"error": None})
 
 
-@app.get("/today", dependencies=[Depends(require_token)])
-def today() -> dict:
-    """Today's plan rendered in JSON, mode-aware."""
+@app.post("/login")
+def login_submit(request: Request, token: str = Form(default="")):
+    expected = _token()
+    if not expected:
+        return RedirectResponse("/", status_code=303)
+    if hmac.compare_digest(token, expected):
+        request.session["auth"] = True
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(
+        request, "login.html", {"error": "Incorrect token."}, status_code=401,
+    )
+
+
+@app.get("/logout")
+def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse("/login", status_code=303)
+
+
+# --- HTML views ------------------------------------------------------------
+
+@app.get("/", response_class=HTMLResponse, dependencies=[Depends(require_session)])
+def today_view(request: Request):
     root = get_life_os_root()
     d = date.today()
     mode = load_mode(root)
-
+    ctx: dict = {"request": request, "nav": "today", "date": d.isoformat(), "mode": mode}
     if mode["plan_mode"] == "goals":
         try:
             tasks, _lint, _gen = load_queue(root)
-        except (OSError, FileNotFoundError):
+        except OSError:
+            tasks = []
+        anchors, live, waiting, blocked = split_goals(tasks, d)
+        ctx.update(view="goals", anchors=anchors, live_groups=_group_by_domain(live),
+                   waiting=waiting, blocked=blocked)
+    else:
+        try:
+            result, _state = build_result(root, d)
+            ctx.update(view="blocks", assignments=result.assignments, carried=result.carried)
+        except OSError:
+            ctx.update(view="blocks", assignments=[], carried=[])
+    return templates.TemplateResponse(request, "today.html", ctx)
+
+
+@app.get("/domains", response_class=HTMLResponse, dependencies=[Depends(require_session)])
+def domains_view(request: Request):
+    root = get_life_os_root()
+    thresholds = read_thresholds()
+    entries = read_log_entries(root)
+    d = date.today()
+    rows = []
+    for name in sorted(_domain_names(root)):
+        cfg = thresholds.get(name, {})
+        last = last_completion_for_domain(entries, name)
+        rows.append({
+            "name": name,
+            "cadence": cfg.get("cadence"),
+            "unit": cfg.get("unit"),
+            "last": last.isoformat() if last else None,
+            "week": completions_this_week(entries, name, d),
+            "has_tasks": (root / "domains" / name / "tasks.md").exists(),
+        })
+    return templates.TemplateResponse(
+        request, "domains.html", {"nav": "domains", "domains": rows})
+
+
+@app.get("/domains/{name}", response_class=HTMLResponse,
+         dependencies=[Depends(require_session)])
+def domain_detail(request: Request, name: str):
+    root = get_life_os_root()
+    if name not in _domain_names(root):           # validates + blocks traversal
+        raise HTTPException(status_code=404, detail="unknown domain")
+    ddir = root / "domains" / name
+    tasks: list = []
+    tasks_path = ddir / "tasks.md"
+    if tasks_path.exists():
+        _next, tasks, _lint = parse_tasks_file(tasks_path, name)
+    entries = read_log_entries(root)
+    last = last_completion_for_domain(entries, name)
+    ctx = {
+        "request": request, "nav": "domains", "name": name,
+        "cfg": read_thresholds().get(name, {}),
+        "readme_html": _render_md(_safe_read(ddir / "README.md")),
+        "goals_html": _render_md(_safe_read(ddir / "goals.md")),
+        "tasks": tasks,
+        "last": last.isoformat() if last else None,
+        "week": completions_this_week(entries, name, date.today()),
+    }
+    return templates.TemplateResponse(request, "domain_detail.html", ctx)
+
+
+@app.get("/logs", response_class=HTMLResponse, dependencies=[Depends(require_session)])
+def logs_view(request: Request):
+    root = get_life_os_root()
+    entries = read_log_entries(root)
+    d = date.today()
+    thresholds = read_thresholds()
+
+    recent = []
+    logs_dir = root / "daily" / "logs"
+    if logs_dir.is_dir():
+        for p in sorted(logs_dir.glob("*.md"), reverse=True)[:14]:
+            recent.append({"name": p.stem, "html": _render_md(p.read_text(encoding="utf-8"))})
+
+    summary = []
+    for name in sorted(_domain_names(root)):
+        cfg = thresholds.get(name, {})
+        last = last_completion_for_domain(entries, name)
+        debt = cadence_debt_urgency(cfg.get("cadence"), last, d, cfg.get("days"))
+        summary.append({
+            "domain": name,
+            "week": completions_this_week(entries, name, d),
+            "last": last.isoformat() if last else None,
+            "days_since": (d - last).days if last else None,
+            "debt": round(debt, 1),
+        })
+    return templates.TemplateResponse(
+        request, "logs.html", {"nav": "logs", "recent": recent, "summary": summary})
+
+
+@app.get("/system", response_class=HTMLResponse, dependencies=[Depends(require_session)])
+def system_view(request: Request):
+    root = get_life_os_root()
+    mode = load_mode(root)
+    try:
+        _tasks, lint, generated = load_queue(root)
+    except OSError:
+        lint, generated = [], None
+    groups: list[tuple[str, list]] = []
+    seen: dict[str, int] = {}
+    for group, cmd, desc in COMMAND_REGISTRY:
+        if group not in seen:
+            seen[group] = len(groups)
+            groups.append((group, []))
+        groups[seen[group]][1].append((cmd, desc))
+    ctx = {
+        "request": request, "nav": "system",
+        "rev": _read_rev(), "mode": mode, "generated": generated, "lint": lint,
+        "command_groups": groups,
+        "handoff_html": _render_md(_safe_read(root / "dev" / "handoff.md")),
+        "todo_html": _render_md(_safe_read(root / "dev" / "TODO.md")),
+        "commands_html": _render_md(_safe_read(root / "dev" / "bot-commands.md")),
+    }
+    return templates.TemplateResponse(request, "system.html", ctx)
+
+
+# --- JSON API (header-token auth; preserves the old / and /today shapes) ---
+
+@app.get("/api/", dependencies=[Depends(require_token)])
+def api_index() -> dict:
+    root = get_life_os_root()
+    mode = load_mode(root)
+    return {
+        "app": "Life-OS",
+        "date": date.today().isoformat(),
+        "plan_mode": mode["plan_mode"],
+        "haiku_phrasing": mode["haiku_phrasing"],
+        "links": ["/api/today", "/health"],
+    }
+
+
+@app.get("/api/today", dependencies=[Depends(require_token)])
+def api_today() -> dict:
+    root = get_life_os_root()
+    d = date.today()
+    mode = load_mode(root)
+    if mode["plan_mode"] == "goals":
+        try:
+            tasks, _lint, _gen = load_queue(root)
+        except OSError:
             tasks = []
         anchors, live, waiting, blocked = split_goals(tasks, d)
         return {
-            "mode": "goals",
-            "date": d.isoformat(),
-            "anchors": [{"title": t.title, "time": t.placement.window[0]
-                         if t.placement.window else None}
+            "mode": "goals", "date": d.isoformat(),
+            "anchors": [{"title": t.title,
+                         "time": t.placement.window[0] if t.placement.window else None}
                         for t in anchors],
             "live": [{"domain": t.domain, "title": t.title, "urgency": t.urgency}
                      for t in live],
             "waiting": [{"title": t.title} for t in waiting],
-            "blocked": [{"title": t.title, "reason": t.blocked_reason}
-                        for t in blocked],
+            "blocked": [{"title": t.title, "reason": t.blocked_reason} for t in blocked],
         }
-
-    # blocks mode — return the placement
     try:
         result, _state = build_result(root, d)
-    except (OSError, FileNotFoundError):
+    except OSError:
         return {"mode": "blocks", "date": d.isoformat(), "blocks": []}
     return {
-        "mode": "blocks",
-        "date": d.isoformat(),
+        "mode": "blocks", "date": d.isoformat(),
         "blocks": [
-            {
-                "name": a.block["name"],
-                "start": a.block["start"],
-                "end": a.block["end"],
-                "slot": a.block["slot"],
-                "task": a.task.title if a.task else None,
-                "domain": a.task.domain if a.task else None,
-            }
+            {"name": a.block["name"], "start": a.block["start"], "end": a.block["end"],
+             "slot": a.block["slot"], "task": a.task.title if a.task else None,
+             "domain": a.task.domain if a.task else None}
             for a in result.assignments
         ],
         "carried": [{"id": t.id, "title": t.title} for t in result.carried],

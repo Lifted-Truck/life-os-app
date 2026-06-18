@@ -6,6 +6,10 @@ python-dotenv
 apscheduler>=3.10
 fastapi>=0.110
 uvicorn[standard]>=0.27
+jinja2>=3.1            # web hub templates (also pulled by uvicorn[standard])
+python-multipart>=0.0.9  # login form POST parsing
+itsdangerous>=2.1      # SessionMiddleware cookie signing
+markdown>=3.5          # render README / dev docs to HTML
 
 # dev/test only
 pytest

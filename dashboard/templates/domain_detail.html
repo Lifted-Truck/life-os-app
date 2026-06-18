@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %} · {{ name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ name }}</h1>
+  <a class="back" href="/domains">← all domains</a>
+</div>
+
+<section class="card meta-row">
+  {% if cfg %}
+    {% for k, v in cfg.items() %}<span class="pill">{{ k }}: {{ v }}</span>{% endfor %}
+  {% endif %}
+  <span class="pill">this week: {{ week }}</span>
+  <span class="pill">last: {{ last or "—" }}</span>
+</section>
+
+{% if tasks %}
+<section class="card">
+  <h2>Tasks</h2>
+  <table class="grid">
+    <thead><tr><th>ID</th><th>Title</th><th>Importance</th><th>Slots</th><th>State</th></tr></thead>
+    <tbody>
+      {% for t in tasks %}
+      <tr>
+        <td class="muted small">{{ t.id }}</td>
+        <td>{{ t.title }}</td>
+        <td>{{ t.importance }}</td>
+        <td class="muted small">{{ t.placement.slots|join(", ") if t.placement.slots else "—" }}</td>
+        <td>{% if t.waiting %}waiting{% elif not t.eligible %}blocked{% else %}eligible{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+{% if readme_html %}
+<section class="card prose"><h2>README</h2>{{ readme_html|safe }}</section>
+{% endif %}
+{% if goals_html %}
+<section class="card prose"><h2>Goals</h2>{{ goals_html|safe }}</section>
+{% endif %}
+{% if not readme_html and not goals_html and not tasks %}
+<section class="card"><p class="muted">No content files for this domain yet.</p></section>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %} · System{% endblock %}
+{% block content %}
+<div class="page-head"><h1>System &amp; dev</h1></div>
+
+<section class="card meta-row">
+  <span class="pill">rev: {{ rev }}</span>
+  <span class="pill">mode: {{ mode.plan_mode }}</span>
+  <span class="pill">haiku: {{ "on" if mode.haiku_phrasing else "off" }}</span>
+  <span class="pill">queue: {{ generated or "—" }}</span>
+</section>
+
+<section class="card">
+  <h2>Queue lint {% if lint %}<span class="muted small">({{ lint|length }})</span>{% endif %}</h2>
+  {% if lint %}
+    <ul class="lint">
+      {% for i in lint %}
+      <li class="lvl-{{ i.level }}"><b>{{ i.level }}</b> · <span class="muted">{{ i.where }}</span> — {{ i.message }}</li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="muted">No lint warnings.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Bot commands</h2>
+  {% for group, cmds in command_groups %}
+  <h3 class="domain-h">{{ group }}</h3>
+  <ul class="tasks">
+    {% for cmd, desc in cmds %}
+    <li><code>/{{ cmd }}</code> <span class="muted small">{{ desc }}</span></li>
+    {% endfor %}
+  </ul>
+  {% endfor %}
+</section>
+
+{% if handoff_html %}
+<details class="card prose"><summary><h2 class="inline">dev/handoff.md</h2></summary>{{ handoff_html|safe }}</details>
+{% endif %}
+{% if todo_html %}
+<details class="card prose"><summary><h2 class="inline">dev/TODO.md</h2></summary>{{ todo_html|safe }}</details>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %} · Today{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Today <span class="muted">{{ date }}</span></h1>
+  <span class="pill">mode: {{ mode.plan_mode }}</span>
+</div>
+
+{% if view == "goals" %}
+  {% if anchors %}
+  <section class="card">
+    <h2>Anchors</h2>
+    <ul class="anchors">
+      {% for t in anchors %}
+      <li><span class="time">{{ t.placement.window[0] if t.placement.window else "—" }}</span>
+          {{ t.title }}</li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  <section class="card">
+    <h2>Live today</h2>
+    {% if live_groups %}
+      {% for domain, tasks in live_groups %}
+      <h3 class="domain-h">{{ domain }}</h3>
+      <ul class="tasks">
+        {% for t in tasks %}
+        <li><a href="/domains/{{ t.domain }}">{{ t.title }}</a>
+            <span class="muted small">urgency {{ "%.0f"|format(t.urgency) }}</span></li>
+        {% endfor %}
+      </ul>
+      {% endfor %}
+    {% else %}
+      <p class="muted">Nothing eligible — fresh day.</p>
+    {% endif %}
+  </section>
+
+  {% if waiting %}
+  <section class="card">
+    <h2>Waiting</h2>
+    <ul class="tasks">{% for t in waiting %}<li>{{ t.title }}</li>{% endfor %}</ul>
+  </section>
+  {% endif %}
+  {% if blocked %}
+  <section class="card">
+    <h2>Blocked</h2>
+    <ul class="tasks">{% for t in blocked %}
+      <li>{{ t.title }} <span class="muted small">— {{ t.blocked_reason or "ineligible" }}</span></li>
+    {% endfor %}</ul>
+  </section>
+  {% endif %}
+
+{% else %}
+  <section class="card">
+    <h2>Schedule</h2>
+    <table class="grid">
+      <thead><tr><th>Time</th><th>Block</th><th>Task</th><th>Domain</th></tr></thead>
+      <tbody>
+        {% for a in assignments %}
+        <tr class="{{ 'open' if not a.task else '' }}">
+          <td class="time">{{ a.block.start }}–{{ a.block.end }}</td>
+          <td>{{ a.block.name }}</td>
+          <td>{{ a.task.title if a.task else "—" }}</td>
+          <td>{% if a.task and a.task.domain %}<a href="/domains/{{ a.task.domain }}">{{ a.task.domain }}</a>{% else %}—{% endif %}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="muted">No plan built for today.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% if carried %}
+  <section class="card">
+    <h2>Carried forward</h2>
+    <ul class="tasks">{% for t in carried %}<li>{{ t.title }} <span class="muted small">{{ t.id }}</span></li>{% endfor %}</ul>
+  </section>
+  {% endif %}
+{% endif %}
+{% endblock %}

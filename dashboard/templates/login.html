@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Life-OS · Log in</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}">
+</head>
+<body class="login-body">
+  <form class="login-card" method="post" action="/login">
+    <h1>Life&#8209;OS</h1>
+    <p class="muted">Enter the dashboard token to continue.</p>
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    <input type="password" name="token" placeholder="Dashboard token" autofocus
+           autocomplete="current-password">
+    <button type="submit">Log in</button>
+  </form>
+</body>
+</html>

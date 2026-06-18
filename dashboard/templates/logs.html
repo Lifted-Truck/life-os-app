@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %} · Logs{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Logs &amp; history</h1></div>
+
+<section class="card">
+  <h2>Cadence health</h2>
+  <table class="grid">
+    <thead><tr><th>Domain</th><th>This week</th><th>Last done</th><th>Days since</th><th>Debt</th></tr></thead>
+    <tbody>
+      {% for s in summary %}
+      <tr>
+        <td><a href="/domains/{{ s.domain }}">{{ s.domain }}</a></td>
+        <td>{{ s.week }}</td>
+        <td>{{ s.last or "—" }}</td>
+        <td>{{ s.days_since if s.days_since is not none else "—" }}</td>
+        <td class="{{ 'hot' if s.debt and s.debt >= 50 else '' }}">{{ s.debt }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted small">Debt = cadence-debt urgency (rises as a recurring domain goes past its cadence).</p>
+</section>
+
+<section class="card">
+  <h2>Recent days</h2>
+  {% if recent %}
+    {% for day in recent %}
+    <details class="logday" {{ 'open' if loop.first else '' }}>
+      <summary>{{ day.name }}</summary>
+      <div class="prose">{{ day.html|safe }}</div>
+    </details>
+    {% endfor %}
+  {% else %}
+    <p class="muted">No daily logs yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

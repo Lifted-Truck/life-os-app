@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Life-OS{% block title %}{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">Life&#8209;OS</a>
+    <nav>
+      <a href="/"        class="{{ 'on' if nav == 'today' else '' }}">Today</a>
+      <a href="/domains" class="{{ 'on' if nav == 'domains' else '' }}">Domains</a>
+      <a href="/logs"    class="{{ 'on' if nav == 'logs' else '' }}">Logs</a>
+      <a href="/system"  class="{{ 'on' if nav == 'system' else '' }}">System</a>
+      <span class="soon" title="Coming in a later phase">Control</span>
+      <span class="soon" title="Coming in a later phase">Manage</span>
+    </nav>
+    <a class="logout" href="/logout">Log out</a>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="foot">
+    <span>Life-OS web hub · read-only (Phase 1)</span>
+  </footer>
+</body>
+</html>
