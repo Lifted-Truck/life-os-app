@@ -36,6 +36,41 @@ class LogEntry:
     task_id: Optional[str] = None
     outcome: Optional[str] = None
     domain: Optional[str] = None
+    # Quantitative amount of work logged, when recorded. `duration` is normalized
+    # to minutes (unit "minutes"); an explicit `amount:`/`unit:` pair is taken as
+    # written. None when the entry carries no structured amount. (L0 — progress
+    # metrics; older entries and freeform /log entries leave these None.)
+    amount: Optional[float] = None
+    unit: Optional[str] = None
+
+
+def _parse_duration_minutes(s: str) -> Optional[float]:
+    """Best-effort minutes from a `duration:` value: '60 min', '90', '1.5 h'."""
+    s = s.strip().lower()
+    m = re.search(r"(\d+(?:\.\d+)?)", s)
+    if not m:
+        return None
+    n = float(m.group(1))
+    # treat an hours marker (and no minutes marker) as hours
+    if ("h" in s) and ("min" not in s):
+        return n * 60
+    return n
+
+
+def _amount_unit(d: dict) -> tuple:
+    """Derive (amount, unit) from a parsed entry's fields. Structured `amount:`
+    wins; otherwise normalize `duration:` to minutes. Returns (None, None) when
+    no quantitative value is present."""
+    if d.get("amount"):
+        try:
+            return float(d["amount"]), (d.get("unit") or None)
+        except (TypeError, ValueError):
+            return None, (d.get("unit") or None)
+    if d.get("duration"):
+        mins = _parse_duration_minutes(d["duration"])
+        if mins is not None:
+            return mins, "minutes"
+    return None, None
 
 
 def _domain_of(entry: LogEntry) -> Optional[str]:
@@ -53,11 +88,14 @@ def parse_log_text(text: str, file_date: date) -> list:
 
     def flush():
         if current and (current.get("task") or current.get("outcome")):
+            amount, unit = _amount_unit(current)
             entries.append(LogEntry(
                 date=file_date,
                 task_id=current.get("task"),
                 outcome=current.get("outcome"),
                 domain=current.get("domain"),
+                amount=amount,
+                unit=unit,
             ))
 
     for line in text.splitlines():
@@ -68,7 +106,7 @@ def parse_log_text(text: str, file_date: date) -> list:
         m = _FIELD_RE.match(line)
         if m and current is not None:
             key, val = m.group(1).strip().lower(), m.group(2).strip()
-            if key in ("task", "outcome", "domain"):
+            if key in ("task", "outcome", "domain", "duration", "amount", "unit"):
                 current[key] = val or None
     flush()
     return entries
