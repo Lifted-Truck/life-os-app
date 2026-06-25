@@ -36,49 +36,54 @@ class LogEntry:
     task_id: Optional[str] = None
     outcome: Optional[str] = None
     domain: Optional[str] = None
-    # Quantitative amount of work logged, when recorded. `duration` is normalized
-    # to minutes (unit "minutes"); an explicit `amount:`/`unit:` pair is taken as
-    # written. None when the entry carries no structured amount. (L0 — progress
-    # metrics; older entries and freeform /log entries leave these None.)
+    # Quantitative amount of work logged, parsed from the canonical `duration:`
+    # field (DOMAIN-FORMAT.md §2: "X min | X words | X pages | X sessions"). The
+    # unit is read from the value; hours/minutes normalize to "minutes". None
+    # when the entry records no amount (older / freeform entries). (L0 — metrics.)
     amount: Optional[float] = None
     unit: Optional[str] = None
 
 
-def _parse_duration_minutes(s: str) -> Optional[float]:
-    """Best-effort minutes from a `duration:` value: '60 min', '90', '1.5 h'."""
-    s = s.strip().lower()
-    m = re.search(r"(\d+(?:\.\d+)?)", s)
+# Unit vocabulary accepted inside a `duration:` value → canonical unit name.
+_UNIT_WORDS = {
+    "min": "minutes", "mins": "minutes", "minute": "minutes",
+    "minutes": "minutes", "m": "minutes",
+    "h": "hours", "hr": "hours", "hrs": "hours", "hour": "hours", "hours": "hours",
+    "word": "words", "words": "words", "w": "words",
+    "page": "pages", "pages": "pages", "p": "pages",
+    "session": "sessions", "sessions": "sessions", "sess": "sessions",
+}
+
+
+def _parse_amount(value: str) -> tuple:
+    """Parse a `duration:` value into (amount, unit).
+
+    Reads the unit word from the value — '60 min'→(60,'minutes'),
+    '500 words'→(500,'words'), '1.5 h'→(90,'minutes'), '3 pages'→(3,'pages').
+    A bare number yields (n, None) (unit unknown from the entry alone). Returns
+    (None, None) when no leading number is found.
+    """
+    m = re.match(r"\s*(\d+(?:\.\d+)?)\s*([a-zA-Z]+)?", value.strip())
     if not m:
-        return None
+        return None, None
     n = float(m.group(1))
-    # treat an hours marker (and no minutes marker) as hours
-    if ("h" in s) and ("min" not in s):
-        return n * 60
-    return n
+    word = (m.group(2) or "").lower()
+    unit = _UNIT_WORDS.get(word) if word else None
+    if unit == "hours":
+        return n * 60, "minutes"
+    return n, unit
 
 
-def _amount_unit(d: dict) -> tuple:
-    """Derive (amount, unit) from a parsed entry's fields. Structured `amount:`
-    wins; otherwise normalize `duration:` to minutes. Returns (None, None) when
-    no quantitative value is present."""
-    if d.get("amount"):
-        try:
-            return float(d["amount"]), (d.get("unit") or None)
-        except (TypeError, ValueError):
-            return None, (d.get("unit") or None)
-    if d.get("duration"):
-        mins = _parse_duration_minutes(d["duration"])
-        if mins is not None:
-            return mins, "minutes"
-    return None, None
-
-
-def _domain_of(entry: LogEntry) -> Optional[str]:
+def domain_of(entry: LogEntry) -> Optional[str]:
+    """Resolve a log entry's domain — explicit `domain:`, else the task-id prefix."""
     if entry.domain:
         return entry.domain
     if entry.task_id and "-" in entry.task_id:
         return entry.task_id.rsplit("-", 1)[0]
     return None
+
+
+_domain_of = domain_of   # internal alias (kept for existing call sites)
 
 
 def parse_log_text(text: str, file_date: date) -> list:
@@ -88,7 +93,8 @@ def parse_log_text(text: str, file_date: date) -> list:
 
     def flush():
         if current and (current.get("task") or current.get("outcome")):
-            amount, unit = _amount_unit(current)
+            amount, unit = (_parse_amount(current["duration"])
+                            if current.get("duration") else (None, None))
             entries.append(LogEntry(
                 date=file_date,
                 task_id=current.get("task"),
@@ -106,7 +112,7 @@ def parse_log_text(text: str, file_date: date) -> list:
         m = _FIELD_RE.match(line)
         if m and current is not None:
             key, val = m.group(1).strip().lower(), m.group(2).strip()
-            if key in ("task", "outcome", "domain", "duration", "amount", "unit"):
+            if key in ("task", "outcome", "domain", "duration"):
                 current[key] = val or None
     flush()
     return entries

@@ -1,4 +1,6 @@
-"""Log parser — quantitative amount/unit extraction (L0 for progress metrics)."""
+"""Log parser — quantitative amount/unit extraction from the canonical
+`duration:` field (DOMAIN-FORMAT.md §2: "X min | X words | X pages | X sessions").
+"""
 from datetime import date
 
 from scheduler.logs import parse_log_text
@@ -12,44 +14,60 @@ def _one(text):
     return entries[0]
 
 
-def test_duration_minutes():
-    e = _one("## 2026-06-18\n\n- **duration:** 60 min\n- **outcome:** done\n"
-             "- **domain:** music-practice\n")
+def _entry(duration_line, extra=""):
+    return _one(f"## {D.isoformat()}\n\n{duration_line}\n- **outcome:** done\n{extra}")
+
+
+def test_minutes():
+    e = _entry("- **duration:** 60 min")
     assert e.amount == 60.0 and e.unit == "minutes"
-    assert e.domain == "music-practice" and e.outcome == "done"
 
 
-def test_duration_hours_normalized_to_minutes():
-    e = _one("## x\n\n- **duration:** 1.5 h\n- **outcome:** done\n")
+def test_hours_normalized_to_minutes():
+    e = _entry("- **duration:** 1.5 h")
     assert e.amount == 90.0 and e.unit == "minutes"
 
 
-def test_explicit_amount_and_unit():
-    e = _one("## x\n\n- **amount:** 500\n- **unit:** words\n- **outcome:** done\n"
-             "- **domain:** novel\n")
+def test_words():
+    e = _entry("- **duration:** 500 words", "- **domain:** novel")
     assert e.amount == 500.0 and e.unit == "words"
 
 
-def test_no_amount_is_none():
-    e = _one("## x\n\n- **covered:** wrote some stuff\n- **outcome:** done\n")
+def test_pages():
+    e = _entry("- **duration:** 3 pages")
+    assert e.amount == 3.0 and e.unit == "pages"
+
+
+def test_sessions():
+    e = _entry("- **duration:** 1 session")
+    assert e.amount == 1.0 and e.unit == "sessions"
+
+
+def test_bare_number_has_no_unit():
+    e = _entry("- **duration:** 45")
+    assert e.amount == 45.0 and e.unit is None
+
+
+def test_no_duration_is_none():
+    e = _one(f"## {D.isoformat()}\n\n- **covered:** wrote some stuff\n- **outcome:** done\n")
     assert e.amount is None and e.unit is None
 
 
-def test_bad_amount_is_safe():
-    e = _one("## x\n\n- **amount:** lots\n- **outcome:** done\n")
-    assert e.amount is None
+def test_unparseable_duration_is_safe():
+    e = _entry("- **duration:** a while")
+    assert e.amount is None and e.unit is None
 
 
 def test_backward_compatible_fields():
-    e = _one("## x\n\n- **outcome:** done\n- **task:** novel-003\n")
+    e = _one(f"## {D.isoformat()}\n\n- **outcome:** done\n- **task:** novel-003\n")
     assert e.task_id == "novel-003" and e.outcome == "done"
     assert e.amount is None and e.unit is None
 
 
 def test_multiple_entries_mixed():
-    text = ("## 2026-06-18\n\n- **duration:** 30 min\n- **outcome:** done\n"
+    text = (f"## {D.isoformat()}\n\n- **duration:** 30 min\n- **outcome:** done\n"
             "- **domain:** career\n\n"
-            "## 2026-06-18\n\n- **outcome:** partial\n- **domain:** fitness\n")
+            f"## {D.isoformat()}\n\n- **outcome:** partial\n- **domain:** fitness\n")
     entries = parse_log_text(text, D)
     assert len(entries) == 2
     assert entries[0].amount == 30.0 and entries[0].unit == "minutes"

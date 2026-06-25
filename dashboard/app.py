@@ -29,6 +29,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from commands_doc import COMMAND_REGISTRY
+from scheduler.domains import list_domains, read_thresholds
 from scheduler.compile_queue import load_queue
 from scheduler.day import build_result
 from scheduler.day_template import load_day_template
@@ -41,7 +42,7 @@ from scheduler.logs import (
 from scheduler.mode import load_mode
 from scheduler.tasks_parser import parse_tasks_file
 from scheduler.urgency import cadence_debt_urgency
-from utils import get_life_os_root, read_thresholds
+from utils import get_life_os_root
 
 BASE = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE / "templates"))
@@ -115,12 +116,9 @@ def _render_md(text: str | None) -> str | None:
     return _md.markdown(text, extensions=["tables", "fenced_code"])
 
 
-def _domain_names(root: Path) -> set[str]:
-    names = {k for k in read_thresholds() if k != "config"}
-    ddir = root / "domains"
-    if ddir.is_dir():
-        names |= {p.name for p in ddir.iterdir() if p.is_dir()}
-    return names
+def _domain_names(root: Path) -> set:
+    """Canonical domain set for this tree (see scheduler.domains.list_domains)."""
+    return set(list_domains(root))
 
 
 def _group_by_domain(tasks: list) -> list[tuple[str, list]]:
@@ -211,7 +209,7 @@ def today_view(request: Request):
 @app.get("/domains", response_class=HTMLResponse, dependencies=[Depends(require_session)])
 def domains_view(request: Request):
     root = get_life_os_root()
-    thresholds = read_thresholds()
+    thresholds = read_thresholds(root)
     entries = read_log_entries(root)
     d = date.today()
     rows = []
@@ -245,7 +243,7 @@ def domain_detail(request: Request, name: str):
     last = last_completion_for_domain(entries, name)
     ctx = {
         "request": request, "nav": "domains", "name": name,
-        "cfg": read_thresholds().get(name, {}),
+        "cfg": read_thresholds(root).get(name, {}),
         "readme_html": _render_md(_safe_read(ddir / "README.md")),
         "goals_html": _render_md(_safe_read(ddir / "goals.md")),
         "tasks": tasks,
@@ -260,7 +258,7 @@ def logs_view(request: Request):
     root = get_life_os_root()
     entries = read_log_entries(root)
     d = date.today()
-    thresholds = read_thresholds()
+    thresholds = read_thresholds(root)
 
     recent = []
     logs_dir = root / "daily" / "logs"

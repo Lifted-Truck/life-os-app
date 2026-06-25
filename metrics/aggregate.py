@@ -18,9 +18,8 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Optional
 
-import yaml
-
-from scheduler.logs import _domain_of, read_log_entries
+from scheduler.domains import list_domains, read_thresholds
+from scheduler.logs import domain_of, read_log_entries
 
 COMPLETED = ("done", "partial")
 
@@ -46,7 +45,7 @@ def _iter_buckets(start: date, end: date, bucket: str):
 
 
 def _domain_entries(entries: list, domain: str) -> list:
-    return [e for e in entries if _domain_of(e) == domain]
+    return [e for e in entries if domain_of(e) == domain]
 
 
 def _sole_unit(entries: list) -> Optional[str]:
@@ -135,21 +134,13 @@ def adherence(entries: list, domain: str, start: date, end: date,
 
 # --- convenience wrappers (read log + thresholds from a root) ---------------
 
-def _thresholds(root) -> dict:
-    try:
-        return yaml.safe_load((Path(root) / "thresholds.yaml").read_text(
-            encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError):
-        return {}
-
-
 def domain_progress(root, domain: str, days: int = 30, bucket: str = "day",
                     today: Optional[date] = None) -> dict:
     """Full progress payload for one domain — the REST/MCP unit of recall."""
     today = today or date.today()
     start = today - timedelta(days=days - 1)
     entries = read_log_entries(Path(root))
-    cfg = _thresholds(root).get(domain, {})
+    cfg = read_thresholds(root).get(domain, {})
     cadence = cfg.get("cadence")
     ser = series(entries, domain, start, today, bucket)
     unit = ser["unit"] or cfg.get("unit")
@@ -171,11 +162,9 @@ def all_domains_summary(root, days: int = 30,
     today = today or date.today()
     start = today - timedelta(days=days - 1)
     entries = read_log_entries(Path(root))
-    th = _thresholds(root)
-    names = {k for k in th if k != "config"}
-    names |= {_domain_of(e) for e in entries if _domain_of(e)}
+    th = read_thresholds(root)
     out = []
-    for domain in sorted(n for n in names if n):
+    for domain in list_domains(root):
         cfg = th.get(domain, {})
         cadence = cfg.get("cadence")
         t = totals(entries, domain, start, today)
