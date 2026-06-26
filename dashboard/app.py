@@ -22,13 +22,14 @@ from datetime import date
 from pathlib import Path
 
 import markdown as _md
-from fastapi import Depends, FastAPI, Form, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Form, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from commands_doc import COMMAND_REGISTRY
+from metrics.aggregate import all_domains_summary, domain_progress
 from scheduler.domains import list_domains, read_thresholds
 from scheduler.compile_queue import load_queue
 from scheduler.day import build_result
@@ -358,3 +359,27 @@ def api_today() -> dict:
         ],
         "carried": [{"id": t.id, "title": t.title} for t in result.carried],
     }
+
+
+@app.get("/api/metrics", dependencies=[Depends(require_token)])
+def api_metrics(days: int = Query(30, ge=1, le=365)) -> dict:
+    """Per-domain progress summary (no full series) — the metrics index."""
+    root = get_life_os_root()
+    return {
+        "date": date.today().isoformat(),
+        "days": days,
+        "domains": all_domains_summary(root, days=days),
+    }
+
+
+@app.get("/api/metrics/{domain}", dependencies=[Depends(require_token)])
+def api_metrics_domain(
+    domain: str,
+    days: int = Query(30, ge=1, le=365),
+    bucket: str = Query("day", pattern="^(day|week)$"),
+) -> dict:
+    """Full progress payload (series + summary) for one domain."""
+    root = get_life_os_root()
+    if domain not in list_domains(root):
+        raise HTTPException(status_code=404, detail="unknown domain")
+    return domain_progress(root, domain, days=days, bucket=bucket)
