@@ -28,8 +28,14 @@ set -euo pipefail
 DATA_DIR="${DATA_DIR:-/home/life/data}"
 cd "$DATA_DIR"
 
-# 1. Commit any local dirty changes.
-if ! git diff --quiet || ! git diff --cached --quiet; then
+# 1. Commit any local dirty changes — INCLUDING new untracked files.
+# `git status --porcelain` reports untracked paths too; the old
+# `git diff --quiet` guard saw only tracked changes, so a lone new file
+# (e.g. the first daily/reviews/ capture in a cycle with no other churn)
+# was never committed. Harmless until the derived files (queue.yaml,
+# today-state.yaml) were gitignored — which made zero-tracked-change cycles
+# common and stranded new files. See dev/plans/architecture-review.md Tier-1B.
+if [ -n "$(git status --porcelain)" ]; then
     git add -A
     git -c user.name="life-os-bot" \
         -c user.email="bot@mindlathe.xyz" \
