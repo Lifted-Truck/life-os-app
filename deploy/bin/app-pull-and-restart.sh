@@ -86,11 +86,24 @@ if [[ -n "$SYSTEMD_CHANGED" ]]; then
     sudo /bin/systemctl daemon-reload
 fi
 
-# 6. Restart code-bearing services. Both are quick (~2-3s).
+# 6. TEST GATE — never restart onto a red suite. The pull has already
+# happened (HEAD is at the new rev), so a failure here leaves the running
+# services on the OLD code, exits non-zero, and the unit's OnFailure=
+# fires the Telegram alert. Recovery = push a fix; this script restarts
+# then. Suite runs in ~2s.
+echo "running test suite before restart..."
+if ! ./venv/bin/python -m pytest -q --maxfail=5 > /tmp/life-os-test-gate.log 2>&1; then
+    echo "TEST GATE FAILED — services NOT restarted (still on ${LOCAL:0:8})." >&2
+    tail -20 /tmp/life-os-test-gate.log >&2
+    exit 1
+fi
+echo "tests green."
+
+# 7. Restart code-bearing services. Both are quick (~2-3s).
 echo "restarting life-os-bot and life-os-dashboard..."
 sudo /bin/systemctl restart life-os-bot life-os-dashboard
 
-# 7. Flag any deploy/ file changes that genuinely need a manual install
+# 8. Flag any deploy/ file changes that genuinely need a manual install
 # run (Caddyfile needs sed-render + caddy reload; install-services.sh is
 # the installer script itself).
 if echo "$CHANGED" | grep -qE '^deploy/(Caddyfile|install-services\.sh)$'; then

@@ -80,7 +80,8 @@ def goals_mode_fire_times(template_blocks: list[dict], queue_tasks: list,
 def arm(scheduler, build_result_fn: Callable, root,
         send_notify_fn: Callable, send_checkin_fn: Callable,
         rearm_fn: Callable, *, today: date | None = None,
-        now: datetime | None = None, lead_min: int = NOTIFY_LEAD_MIN) -> int:
+        now: datetime | None = None, lead_min: int = NOTIFY_LEAD_MIN,
+        send_review_fn: Callable | None = None) -> int:
     """(Re)arm today's notify/check-in jobs on the given APScheduler.
 
     Wipes any prior jobs in our id-namespace first (so /plan reshuffles drop
@@ -96,7 +97,7 @@ def arm(scheduler, build_result_fn: Callable, root,
     now = now or datetime.now()
 
     for job in list(scheduler.get_jobs()):
-        if job.id.startswith(("nf:", "ci:")) or job.id == "midnight-rearm":
+        if job.id.startswith(("nf:", "ci:", "rv:")) or job.id == "midnight-rearm":
             scheduler.remove_job(job.id)
 
     # Local imports keep notifications.py free of bot-runtime deps in tests.
@@ -128,6 +129,14 @@ def arm(scheduler, build_result_fn: Callable, root,
             scheduler.add_job(send_checkin_fn, "date", run_date=when, args=[name],
                               id=f"ci:{when:%H%M}:{name}", replace_existing=True)
         armed = len(notify) + len(checkin)
+
+    # Review prompts (daily evening / Sunday weekly) — mode-independent.
+    if send_review_fn is not None:
+        from bot_handlers.review import review_fire_times
+        for kind, when in review_fire_times(today, now):
+            scheduler.add_job(send_review_fn, "date", run_date=when, args=[kind],
+                              id=f"rv:{kind}", replace_existing=True)
+            armed += 1
 
     midnight = datetime.combine(today, datetime.min.time()) + timedelta(days=1, minutes=5)
     scheduler.add_job(rearm_fn, "date", run_date=midnight, id="midnight-rearm",

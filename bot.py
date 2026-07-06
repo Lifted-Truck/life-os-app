@@ -14,6 +14,8 @@ from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
+    MessageHandler,
+    filters,
 )
 
 from utils import (
@@ -48,6 +50,11 @@ from scheduler.compile_queue import load_queue
 from scheduler.mode import load_mode, set_haiku_phrasing, set_plan_mode, VALID_PLAN_MODES
 from scheduler.goals import render_goals_readme_body, render_goals_text, split_goals
 from commands_doc import COMMAND_REGISTRY, write_bot_commands_md
+from bot_handlers.review import (
+    build_cmd_review,
+    build_review_reply_capture,
+    build_send_review_prompt,
+)
 import notifications
 
 load_dotenv(Path(__file__).parent / ".env", override=True)
@@ -1531,6 +1538,7 @@ async def _arm_today() -> int:
     armed = notifications.arm(
         _aps_scheduler, build_result, get_life_os_root(),
         send_notify, send_checkin, _arm_today,
+        send_review_fn=send_review_prompt,
     )
     logger.info("T-5 jobs armed: %d", armed)
     return armed
@@ -1578,6 +1586,14 @@ async def send_checkin(block_name: str) -> None:
             reply_markup=_checkin_keyboard(block_name),
             parse_mode="Markdown",
         )
+
+
+# --- messy-review capture (bot_handlers/review.py; factories get our helpers)
+
+send_review_prompt = build_send_review_prompt(
+    lambda: os.getenv("TELEGRAM_BOT_TOKEN"), get_chat_id, get_life_os_root)
+cmd_review = build_cmd_review(is_authorized, get_life_os_root)
+review_reply_capture = build_review_reply_capture(is_authorized, get_life_os_root)
 
 
 # ---------------------------------------------------------------------------
@@ -1629,6 +1645,10 @@ def run_bot() -> None:
     app.add_handler(CommandHandler("commands", cmd_commands))
     app.add_handler(CommandHandler("help", cmd_commands))   # familiar alias
     app.add_handler(CommandHandler("mode", cmd_mode))
+    app.add_handler(CommandHandler("review", cmd_review))
+    # Bare replies to a review prompt become capture stanzas.
+    app.add_handler(MessageHandler(
+        filters.REPLY & filters.TEXT & ~filters.COMMAND, review_reply_capture))
     app.add_handler(CallbackQueryHandler(checkin_callback, pattern=r"^ci:"))
     app.add_handler(CallbackQueryHandler(skip_callback, pattern=r"^sk:"))
     app.add_handler(CallbackQueryHandler(extend_callback, pattern=r"^ex:"))
