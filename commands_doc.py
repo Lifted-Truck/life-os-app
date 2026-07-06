@@ -18,6 +18,8 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+from scheduler.fileio import atomic_write_text
+
 # (group, command, one-line description). Group order determines doc order.
 COMMAND_REGISTRY: list[tuple[str, str, str]] = [
     ("Daily flow", "plan",      "Show today's plan; check-in if a block is in progress"),
@@ -83,6 +85,5 @@ def render_bot_commands_md(registry: list[tuple[str, str, str]] | None = None,
 def write_bot_commands_md(life_os_root) -> Path:
     """Write/refresh dev/bot-commands.md in the data tree. Returns the path."""
     out = Path(life_os_root) / "dev" / "bot-commands.md"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(render_bot_commands_md(), encoding="utf-8")
+    atomic_write_text(out, render_bot_commands_md())
     return out

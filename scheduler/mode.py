@@ -17,6 +17,8 @@ from pathlib import Path
 
 import yaml
 
+from .fileio import atomic_write_text
+
 DEFAULT_MODE: dict = {
     "plan_mode": "blocks",       # "blocks" | "goals"
     "haiku_phrasing": False,
@@ -56,7 +58,7 @@ def save_mode(root, mode: dict) -> None:
         safe["plan_mode"] = mode["plan_mode"]
     if isinstance(mode.get("haiku_phrasing"), bool):
         safe["haiku_phrasing"] = mode["haiku_phrasing"]
-    p.write_text(yaml.safe_dump(safe, sort_keys=False), encoding="utf-8")
+    atomic_write_text(p, yaml.safe_dump(safe, sort_keys=False))
 
 
 def set_plan_mode(root, plan_mode: str) -> dict:

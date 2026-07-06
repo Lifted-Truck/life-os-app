@@ -35,6 +35,7 @@ from pathlib import Path
 import yaml
 
 from .constants import DEFAULT_BLOCKS, SLOT_VOCAB
+from .fileio import atomic_write_text
 
 logger = logging.getLogger(__name__)
 
@@ -105,10 +106,9 @@ def parse_blocks(data) -> list[dict]:
 
 def _write_cache(blocks: list[dict], cache_path: Path) -> None:
     try:
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        cache_path.write_text(
+        atomic_write_text(
+            cache_path,
             yaml.safe_dump({"blocks": blocks}, sort_keys=False, allow_unicode=True),
-            encoding="utf-8",
         )
     except OSError as e:  # caching is best-effort; never fail the day over it
         logger.warning("day template: could not refresh cache (%s)", e)

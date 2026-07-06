@@ -23,6 +23,7 @@ import yaml
 
 from .constants import IMPORTANCE_WEIGHT, MANDATORY_WEEKLY_BOOST
 from .days import expand_days
+from .fileio import atomic_write_text
 from .logs import (
     completions_this_week,
     done_task_ids,
@@ -295,7 +296,7 @@ def write_queue(root: Path, tasks: list, lint: list, generated: Optional[str] = 
         "lint": [i.to_dict() for i in lint],
     }
     body = yaml.safe_dump(payload, sort_keys=False, allow_unicode=True, default_flow_style=False)
-    (root / "schedule" / "queue.yaml").write_text(QUEUE_HEADER + "\n" + body, encoding="utf-8")
+    atomic_write_text(root / "schedule" / "queue.yaml", QUEUE_HEADER + "\n" + body)
 
 
 def load_queue(root: Path) -> tuple[list, list, Optional[str]]:

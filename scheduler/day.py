@@ -18,6 +18,7 @@ import yaml
 
 from .compile_queue import load_queue
 from .day_template import load_day_template
+from .fileio import atomic_write_text
 from .logs import read_log_entries
 from .schedule import render_daily_readme_body, schedule
 
@@ -51,8 +52,9 @@ def load_state(root: Path, today: date) -> dict:
 
 
 def save_state(root: Path, state: dict) -> None:
-    _state_path(root).write_text(
-        yaml.safe_dump(state, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    atomic_write_text(
+        _state_path(root),
+        yaml.safe_dump(state, sort_keys=False, allow_unicode=True))
 
 
 def reset_state(root: Path, today: date) -> dict:
@@ -296,7 +298,7 @@ def write_daily_readme(root: Path, result, today: Optional[date] = None) -> None
         generated=datetime.now().strftime("%H:%M"),
         body=body,
     )
-    (root / "daily" / "README.md").write_text(content, encoding="utf-8")
+    atomic_write_text(root / "daily" / "README.md", content)
 
 
 def write_daily_readme_from_body(root: Path, body: str,
@@ -308,7 +310,7 @@ def write_daily_readme_from_body(root: Path, body: str,
         generated=datetime.now().strftime("%H:%M"),
         body=body,
     )
-    (root / "daily" / "README.md").write_text(content, encoding="utf-8")
+    atomic_write_text(root / "daily" / "README.md", content)
 
 
 def reshuffle_and_write(root: Path, today: Optional[date] = None):

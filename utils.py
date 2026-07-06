@@ -5,6 +5,8 @@ from pathlib import Path
 import yaml
 from dotenv import load_dotenv
 
+from scheduler.fileio import atomic_write_text, file_lock, locked_append_text
+
 load_dotenv(Path(__file__).parent / ".env", override=True)
 
 
@@ -20,16 +22,13 @@ def read_file(relative_path: str) -> str:
 
 
 def write_file(relative_path: str, content: str) -> None:
-    path = get_life_os_root() / relative_path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    """Whole-file write to the data tree — atomic (see scheduler.fileio)."""
+    atomic_write_text(get_life_os_root() / relative_path, content)
 
 
 def append_to_file(relative_path: str, content: str) -> None:
-    path = get_life_os_root() / relative_path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as f:
-        f.write(content)
+    """Append to a data-tree file — serialized against concurrent processes."""
+    locked_append_text(get_life_os_root() / relative_path, content)
 
 
 def get_domain_path(domain_name: str) -> Path:
@@ -51,6 +50,11 @@ def today_log_path() -> Path:
 
 def update_threshold(domain: str, field: str, value: float) -> None:
     """Update a single numeric field in thresholds.yaml, preserving comments."""
+    with file_lock(get_life_os_root() / "thresholds.yaml"):
+        _update_threshold_locked(domain, field, value)
+
+
+def _update_threshold_locked(domain: str, field: str, value: float) -> None:
     content = read_file("thresholds.yaml")
     lines = content.splitlines()
     in_domain = False
@@ -92,26 +96,27 @@ def check_inbox_item_by_title(title: str) -> bool:
     path = root / "inbox.md"
     if not path.exists():
         return False
-    original = path.read_text(encoding="utf-8")
-    out_lines: list[str] = []
-    matched = False
-    for line in original.splitlines():
+    with file_lock(path):   # read-modify-write must not interleave with /add etc.
+        original = path.read_text(encoding="utf-8")
+        out_lines: list[str] = []
+        matched = False
+        for line in original.splitlines():
+            if not matched:
+                stripped = line.lstrip()
+                if stripped.startswith("- [ ]"):
+                    body = stripped[len("- [ ]") :].strip()
+                    if title in body:
+                        indent = line[: len(line) - len(stripped)]
+                        rest = stripped[len("- [ ]") :]
+                        line = f"{indent}- [x]{rest}"
+                        matched = True
+            out_lines.append(line)
         if not matched:
-            stripped = line.lstrip()
-            if stripped.startswith("- [ ]"):
-                body = stripped[len("- [ ]") :].strip()
-                if title in body:
-                    indent = line[: len(line) - len(stripped)]
-                    rest = stripped[len("- [ ]") :]
-                    line = f"{indent}- [x]{rest}"
-                    matched = True
-        out_lines.append(line)
-    if not matched:
-        return False
-    new_text = "\n".join(out_lines)
-    if original.endswith("\n") and not new_text.endswith("\n"):
-        new_text += "\n"
-    path.write_text(new_text, encoding="utf-8")
+            return False
+        new_text = "\n".join(out_lines)
+        if original.endswith("\n") and not new_text.endswith("\n"):
+            new_text += "\n"
+        atomic_write_text(path, new_text)
     return True
 
 
@@ -134,27 +139,28 @@ def check_inbox_item(inbox_id: str) -> bool:
     path = root / "inbox.md"
     if not path.exists():
         return False
-    original = path.read_text(encoding="utf-8")
-    n = 0
-    out_lines: list[str] = []
-    matched = False
-    for line in original.splitlines():
+    with file_lock(path):   # read-modify-write must not interleave with /add etc.
+        original = path.read_text(encoding="utf-8")
+        n = 0
+        out_lines: list[str] = []
+        matched = False
+        for line in original.splitlines():
+            if not matched:
+                stripped = line.lstrip()
+                if stripped.startswith("- [ ]"):
+                    n += 1
+                    if n == n_target:
+                        indent = line[: len(line) - len(stripped)]
+                        rest = stripped[len("- [ ]") :]
+                        line = f"{indent}- [x]{rest}"
+                        matched = True
+            out_lines.append(line)
         if not matched:
-            stripped = line.lstrip()
-            if stripped.startswith("- [ ]"):
-                n += 1
-                if n == n_target:
-                    indent = line[: len(line) - len(stripped)]
-                    rest = stripped[len("- [ ]") :]
-                    line = f"{indent}- [x]{rest}"
-                    matched = True
-        out_lines.append(line)
-    if not matched:
-        return False
-    new_text = "\n".join(out_lines)
-    if original.endswith("\n") and not new_text.endswith("\n"):
-        new_text += "\n"
-    path.write_text(new_text, encoding="utf-8")
+            return False
+        new_text = "\n".join(out_lines)
+        if original.endswith("\n") and not new_text.endswith("\n"):
+            new_text += "\n"
+        atomic_write_text(path, new_text)
     return True
 
 
