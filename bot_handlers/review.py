@@ -185,17 +185,22 @@ def build_send_review_prompt(get_token, get_chat_id, root_fn):
 
 
 def build_cmd_review(is_authorized, root_fn):
-    """/review <text> — capture a stanza directly."""
+    """/review — three forms:
+    bare            → send today's review prompt NOW (replies capture)
+    "weekly"        → same, weekly variant
+    anything else   → capture the text as a stanza directly
+    """
     async def cmd_review(update, context) -> None:
         if not is_authorized(update):
             return
-        text = " ".join(context.args or [])
-        if not text:
-            await update.message.reply_text(
-                "Usage: /review <anything, as messy as you like>\n"
-                "Or just reply to an evening/weekly review prompt.")
+        args = context.args or []
+        if not args or (len(args) == 1 and args[0].lower() == "weekly"):
+            weekly = bool(args)
+            text = render_review_prompt(root_fn(), weekly=weekly)
+            msg = await update.message.reply_text(text)
+            PROMPT_IDS[msg.message_id] = "weekly" if weekly else "daily"
             return
-        path = append_review(root_fn(), text, kind="daily")
+        path = append_review(root_fn(), " ".join(args), kind="daily")
         await update.message.reply_text(f"🗒 Captured → {path.name}")
     return cmd_review
 

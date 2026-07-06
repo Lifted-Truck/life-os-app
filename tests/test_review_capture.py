@@ -67,3 +67,44 @@ def test_prompt_weekly_includes_week_numbers(life_os):
 def test_prompt_never_raises_on_broken_tree(tmp_path):
     text = render_review_prompt(tmp_path / "nonexistent")
     assert "Evening review" in text and "/review" in text   # generic fallback
+
+
+# --- /review command handler (stubbed telegram objects) ----------------------
+
+import asyncio
+from types import SimpleNamespace
+
+from bot_handlers.review import PROMPT_IDS, build_cmd_review
+
+
+def _fake_update(sent):
+    async def reply_text(text):
+        sent.append(text)
+        return SimpleNamespace(message_id=7777)
+    return SimpleNamespace(message=SimpleNamespace(reply_text=reply_text))
+
+
+def test_cmd_review_bare_sends_prompt_and_registers(life_os):
+    sent = []
+    cmd = build_cmd_review(lambda u: True, lambda: life_os)
+    asyncio.run(cmd(_fake_update(sent), SimpleNamespace(args=[])))
+    assert sent and "Evening review" in sent[0]
+    assert PROMPT_IDS.get(7777) == "daily"
+    PROMPT_IDS.clear()
+
+
+def test_cmd_review_weekly_variant(life_os):
+    sent = []
+    cmd = build_cmd_review(lambda u: True, lambda: life_os)
+    asyncio.run(cmd(_fake_update(sent), SimpleNamespace(args=["weekly"])))
+    assert PROMPT_IDS.get(7777) == "weekly"
+    PROMPT_IDS.clear()
+
+
+def test_cmd_review_with_text_captures_stanza(life_os):
+    sent = []
+    cmd = build_cmd_review(lambda u: True, lambda: life_os)
+    asyncio.run(cmd(_fake_update(sent), SimpleNamespace(args=["so", "messy"])))
+    files = list((life_os / "daily" / "reviews").glob("*.md"))
+    assert len(files) == 1 and "so messy" in files[0].read_text(encoding="utf-8")
+    assert sent and "Captured" in sent[0]

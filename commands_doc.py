@@ -26,7 +26,7 @@ COMMAND_REGISTRY: list[tuple[str, str, str]] = [
     ("Daily flow", "log",       "[domain] <what you did> — record a completed entry (clears recurring Type 4)"),
     ("Daily flow", "done",      "Pick a one-shot task to mark done (Type 1/2/3); recurring uses /log"),
     ("Daily flow", "ai",        "<text> — freeform note; Haiku tags and saves it"),
-    ("Daily flow", "review",    "<text> — messy daily/weekly review capture; or just reply to the evening prompt"),
+    ("Daily flow", "review",    "<text> captures a messy review; bare /review (or /review weekly) prompts you now"),
 
     ("Reshuffle",  "behind",    "Running behind — pick a scheduled task to drop"),
     ("Reshuffle",  "add",       "<event> @<time> [date] — anchored event w/ reminder; /add queue pins a carried task"),
