@@ -39,10 +39,11 @@ from .fileio import atomic_write_text
 
 logger = logging.getLogger(__name__)
 
-# The app directory (where bot.py / morning.py live) — distinct from the Cowork
-# data tree, so the cache survives running without LIFE_OS_ROOT mounted.
-APP_DIR = Path(__file__).resolve().parent.parent
-CACHE_PATH = APP_DIR / "cache" / "day_template.yaml"
+# Last-known-good cache lives OUTSIDE both repos (2026-07-06 — it used to sit
+# repo-relative inside the app checkout, where a locally-populated cache once
+# leaked into fixture tests). ~/.cache survives re-clones and never interacts
+# with git or the working tree.
+CACHE_PATH = Path.home() / ".cache" / "life-os" / "day_template.yaml"
 SOURCE_REL = Path("schedule") / "template.yaml"
 
 _HHMM_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")

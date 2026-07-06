@@ -82,8 +82,27 @@ def render_bot_commands_md(registry: list[tuple[str, str, str]] | None = None,
     return "\n".join(lines)
 
 
+def _without_generated(text: str) -> str:
+    """The doc body minus the volatile **Generated:** stamp, for comparison."""
+    return "\n".join(
+        ln for ln in text.splitlines() if not ln.startswith("**Generated:**"))
+
+
 def write_bot_commands_md(life_os_root) -> Path:
-    """Write/refresh dev/bot-commands.md in the data tree. Returns the path."""
+    """Write/refresh dev/bot-commands.md in the data tree. Returns the path.
+
+    Skips the write when only the Generated timestamp would change — the file
+    regenerates on every bot start and morning run, and rewriting it each time
+    made it the single most-churned file in the content repo's history.
+    """
     out = Path(life_os_root) / "dev" / "bot-commands.md"
-    atomic_write_text(out, render_bot_commands_md())
+    new = render_bot_commands_md()
+    if out.exists():
+        try:
+            old = out.read_text(encoding="utf-8")
+        except OSError:
+            old = ""
+        if _without_generated(old) == _without_generated(new):
+            return out
+    atomic_write_text(out, new)
     return out

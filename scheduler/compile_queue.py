@@ -300,8 +300,16 @@ def write_queue(root: Path, tasks: list, lint: list, generated: Optional[str] = 
 
 
 def load_queue(root: Path) -> tuple[list, list, Optional[str]]:
-    """Read queue.yaml back into Task objects (frozen urgency for reshuffle)."""
+    """Read queue.yaml back into Task objects (frozen urgency for reshuffle).
+
+    Self-healing: queue.yaml is a derived projection (untracked in git since
+    2026-07-06), so a fresh clone or a pull that removed it just means the
+    projection is missing — derive it. Deterministic for a given date: urgency
+    is date-granular, so an intra-day regeneration matches the morning compile.
+    """
     path = root / "schedule" / "queue.yaml"
+    if not path.exists():
+        compile_to_file(root)
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     tasks = [Task.from_queue_dict(d) for d in (data.get("tasks") or [])]
     lint = [LintIssue(**i) for i in (data.get("lint") or [])]
