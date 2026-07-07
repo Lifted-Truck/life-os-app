@@ -47,3 +47,11 @@ git pull --rebase --autostash --quiet
 
 # 3. Push to all remotes (primary + mirror via origin's two push URLs).
 git push --quiet
+
+# 4. Heartbeat: record a fully-successful cycle OUTSIDE the repo (no git
+# churn). set -e means we only reach here when commit/pull/push all
+# succeeded. life-os-sync-watchdog.timer alerts if this goes stale — which
+# catches the silent-death case (timer stopped entirely), where nothing
+# fails and so nothing would otherwise fire OnFailure. /health exposes its age.
+mkdir -p "$HOME/.cache/life-os"
+date +%s > "$HOME/.cache/life-os/last-sync"

@@ -39,6 +39,8 @@ sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-morning.service"    /etc/sys
 sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-morning.timer"      /etc/systemd/system/
 sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-sync.service"       /etc/systemd/system/
 sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-sync.timer"         /etc/systemd/system/
+sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-sync-watchdog.service" /etc/systemd/system/
+sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-sync-watchdog.timer"   /etc/systemd/system/
 sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-app-pull.service"   /etc/systemd/system/
 sudo install -m 0644 "${DEPLOY_DIR}/systemd/life-os-app-pull.timer"     /etc/systemd/system/
 sudo install -m 0644 "${DEPLOY_DIR}/systemd/notify-failure@.service"    /etc/systemd/system/
@@ -67,6 +69,7 @@ sudo systemctl reload caddy
 
 echo "==> Enabling + starting services..."
 sudo systemctl enable --now life-os-sync.timer
+sudo systemctl enable --now life-os-sync-watchdog.timer
 sudo systemctl enable --now life-os-morning.timer
 sudo systemctl enable --now life-os-app-pull.timer
 sudo systemctl enable --now life-os-dashboard.service

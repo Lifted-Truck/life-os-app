@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the Life-OS sync watchdog every 10 minutes
+
+[Timer]
+OnBootSec=12min
+OnUnitActiveSec=10min
+# Don't stack runs if the box was asleep.
+Persistent=false
+
+[Install]
+WantedBy=timers.target

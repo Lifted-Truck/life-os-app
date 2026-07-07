@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hmac
 import os
+import time
 from datetime import date
 from pathlib import Path
 
@@ -137,9 +138,30 @@ def _group_by_domain(tasks: list) -> list[tuple[str, list]]:
 
 # --- health (unauthenticated; auto-deploy polls its rev) -------------------
 
+def _sync_heartbeat_path() -> Path:
+    """Where sync-data-tree.sh records its last fully-successful cycle."""
+    return Path.home() / ".cache" / "life-os" / "last-sync"
+
+
+def _sync_age_seconds():
+    """Seconds since the data-tree sync last succeeded, or None if unknown."""
+    try:
+        last = int(_sync_heartbeat_path().read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+    return max(0, int(time.time()) - last)
+
+
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "rev": _read_rev()}
+    age = _sync_age_seconds()
+    return {
+        "status": "ok",
+        "rev": _read_rev(),
+        # None until the first sync heartbeat exists (fresh box / local dev).
+        "sync_age_seconds": age,
+        "sync_ok": age is not None and age <= 1200,
+    }
 
 
 def _read_rev() -> str:
