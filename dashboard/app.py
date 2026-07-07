@@ -19,10 +19,11 @@ from __future__ import annotations
 import hmac
 import os
 import time
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import markdown as _md
+import yaml
 from fastapi import Depends, FastAPI, Form, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -30,8 +31,9 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from commands_doc import COMMAND_REGISTRY
-from metrics.aggregate import all_domains_summary, domain_progress
+from metrics.aggregate import all_domains_summary, domain_progress, series
 from scheduler.domains import list_domains, read_thresholds
+from scheduler.logs import read_log_entries
 from scheduler.compile_queue import load_queue
 from scheduler.day import build_result
 from scheduler.day_template import load_day_template
@@ -329,6 +331,106 @@ def system_view(request: Request):
         "commands_html": _render_md(_safe_read(root / "dev" / "bot-commands.md")),
     }
     return templates.TemplateResponse(request, "system.html", ctx)
+
+
+# --- overview (the live system map) ----------------------------------------
+
+def _age_label(sec) -> str:
+    if sec is None:
+        return "unknown"
+    if sec < 90:
+        return f"{sec}s ago"
+    if sec < 5400:
+        return f"{sec // 60} min ago"
+    return f"{sec // 3600}h ago"
+
+
+def _walkthrough_status(root: Path) -> dict:
+    """domain -> 'populated' | 'started' from dev/walkthrough-state.yaml."""
+    try:
+        data = yaml.safe_load(
+            (root / "dev" / "walkthrough-state.yaml").read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return {}
+    out = {}
+    for dom, rec in (data or {}).items():
+        if not isinstance(rec, dict):
+            continue
+        status = str(rec.get("status", ""))
+        done = rec.get("scopes_done") or []
+        out[dom] = "populated" if status.upper().startswith("POPULATED") or len(done) >= 5 \
+            else "started"
+    return out
+
+
+@app.get("/overview", response_class=HTMLResponse, dependencies=[Depends(require_session)])
+def overview(request: Request):
+    root = get_life_os_root()
+    today = date.today()
+    entries = read_log_entries(root)
+    th = read_thresholds(root)
+    walk = _walkthrough_status(root)
+    domains = list_domains(root)
+
+    SPARK_DAYS = 21
+    rows = []
+    for d in domains:
+        ser = series(entries, d, today - timedelta(days=SPARK_DAYS - 1), today, "day")
+        counts = [p["completions"] for p in ser["points"]]
+        cfg = th.get(d, {})
+        rows.append({
+            "domain": d,
+            "state": walk.get(d, "untouched"),   # populated | started | untouched
+            "cadence": cfg.get("cadence"),
+            "has_cadence": bool(cfg.get("cadence")),
+            "spark": counts,
+            "spark_max": max(counts) if counts else 0,
+            "recent": sum(counts[-7:]),
+        })
+    # frontier first: populated on top, then started, then untouched; then name
+    order = {"populated": 0, "started": 1, "untouched": 2}
+    rows.sort(key=lambda r: (order[r["state"]], r["domain"]))
+
+    populated_n = sum(1 for r in rows if r["state"] == "populated")
+    mode = load_mode(root)
+    try:
+        _t, lint, generated = load_queue(root)
+    except OSError:
+        lint, generated = [], None
+
+    # logging streak (any completion) + latest review capture
+    logged_days = sorted({e.date for e in entries if e.outcome in ("done", "partial")})
+    streak = 0
+    probe = today
+    logged_set = set(logged_days)
+    while probe in logged_set:
+        streak += 1
+        probe -= timedelta(days=1)
+
+    latest_review = None
+    rdir = root / "daily" / "reviews"
+    if rdir.is_dir():
+        files = sorted(rdir.glob("*.md"))
+        if files:
+            latest_review = {"name": files[-1].stem,
+                             "html": _render_md(files[-1].read_text(encoding="utf-8"))}
+
+    sync_age = _sync_age_seconds()
+    pulse = {
+        "populated": populated_n,
+        "total": len(rows),
+        "mode": mode["plan_mode"],
+        "lint_warn": sum(1 for i in lint if i.level == "warning"),
+        "lint_err": sum(1 for i in lint if i.level == "error"),
+        "streak": streak,
+        "sync_label": _age_label(sync_age),
+        "sync_ok": sync_age is not None and sync_age <= 1200,
+        "rev": _read_rev(),
+    }
+    return templates.TemplateResponse(
+        request, "overview.html",
+        {"nav": "overview", "rows": rows, "pulse": pulse,
+         "latest_review": latest_review, "spark_days": SPARK_DAYS})
 
 
 # --- JSON API (header-token auth; preserves the old / and /today shapes) ---

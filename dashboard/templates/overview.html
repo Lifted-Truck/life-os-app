@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %} · Overview{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Overview</h1>
+  <span class="muted small">the system, live</span>
+</div>
+
+<section class="pulse">
+  <div class="stat">
+    <div class="stat-n">{{ pulse.populated }}<span class="stat-d">/{{ pulse.total }}</span></div>
+    <div class="stat-l">domains populated</div>
+  </div>
+  <div class="stat">
+    <div class="stat-n">{{ pulse.streak }}</div>
+    <div class="stat-l">day logging streak</div>
+  </div>
+  <div class="stat">
+    <div class="stat-n">{{ pulse.mode }}</div>
+    <div class="stat-l">plan mode</div>
+  </div>
+  <div class="stat">
+    <div class="stat-n {{ 'ok' if pulse.sync_ok else 'warn' }}">{{ pulse.sync_label }}</div>
+    <div class="stat-l">last sync</div>
+  </div>
+  <div class="stat">
+    <div class="stat-n {{ 'warn' if pulse.lint_err or pulse.lint_warn else 'ok' }}">
+      {{ pulse.lint_err }}<span class="stat-d">e</span> {{ pulse.lint_warn }}<span class="stat-d">w</span>
+    </div>
+    <div class="stat-l">queue lint</div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="frontier-head">
+    <h2>Population frontier</h2>
+    <div class="legend">
+      <span><i class="dot populated"></i>populated</span>
+      <span><i class="dot started"></i>started</span>
+      <span><i class="dot untouched"></i>untouched</span>
+    </div>
+  </div>
+  <p class="muted small" style="margin-top:0">
+    Each row is a life domain. The bars are the last {{ spark_days }} days of logged
+    completions — the system filling in as you use it.</p>
+
+  <div class="frontier">
+    {% for r in rows %}
+    <a class="dom-row" href="/domains/{{ r.domain }}">
+      <i class="dot {{ r.state }}" title="{{ r.state }}"></i>
+      <span class="dom-name">{{ r.domain }}</span>
+      <span class="dom-cadence">{{ r.cadence or '—' }}</span>
+      <span class="spark">
+        <svg viewBox="0 0 {{ spark_days * 5 }} 24" preserveAspectRatio="none" role="img"
+             aria-label="{{ r.recent }} completions in the last week">
+          {% for c in r.spark %}
+          {% set h = (c / r.spark_max * 22) if r.spark_max else 0 %}
+          <rect x="{{ loop.index0 * 5 }}" y="{{ 24 - h - 1 }}" width="4"
+                height="{{ h if h > 0 else 0.6 }}"
+                class="{{ 'bar on' if c else 'bar off' }}"></rect>
+          {% endfor %}
+        </svg>
+      </span>
+      <span class="dom-recent {{ 'live' if r.recent else '' }}">{{ r.recent }}<span class="u">/wk</span></span>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="card">
+  <h2>Latest review capture</h2>
+  {% if latest_review %}
+    <div class="muted small" style="margin-bottom:8px">{{ latest_review.name }}</div>
+    <div class="prose review-body">{{ latest_review.html|safe }}</div>
+  {% else %}
+    <p class="muted">No review captured yet. The bot prompts at 21:00 — reply messy.</p>
+  {% endif %}
+</section>
+
+<p class="muted small" style="text-align:center">
+  rev {{ pulse.rev }} · <a href="/system">system detail</a> · <a href="/">today's plan</a>
+</p>
+{% endblock %}

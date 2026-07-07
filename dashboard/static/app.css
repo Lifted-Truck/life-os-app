@@ -99,6 +99,45 @@ details.logday:last-child { border-bottom: 0; }
 
 .foot { text-align: center; color: var(--muted); font-size: .82rem; padding: 24px 0 40px; }
 
+/* --- overview (the live map) --- */
+:root { --good: #7dd491; --warn: #e9c46a; }
+.pulse { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin: 0 0 18px; }
+@media (max-width: 640px){ .pulse { grid-template-columns: repeat(2, 1fr); } }
+.pulse .stat { background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 14px 14px 12px; }
+.stat-n { font-size: 1.5rem; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.stat-n.ok { color: var(--good); } .stat-n.warn { color: var(--warn); }
+.stat-d { color: var(--muted); font-size: .95rem; font-weight: 500; }
+.stat-l { color: var(--muted); font-size: .74rem; text-transform: uppercase;
+  letter-spacing: .05em; margin-top: 4px; }
+
+.frontier-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.legend { display: flex; gap: 14px; color: var(--muted); font-size: .78rem; }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); display: inline-block; flex: none; }
+.dot.populated { background: var(--good); }
+.dot.started { background: var(--warn); }
+.dot.untouched { background: #3a4150; }
+
+.frontier { display: flex; flex-direction: column; margin-top: 8px; }
+.dom-row { display: grid; grid-template-columns: 14px 1fr auto minmax(90px, 150px) auto;
+  align-items: center; gap: 12px; padding: 9px 6px; border-bottom: 1px solid var(--line);
+  color: var(--text); }
+.dom-row:last-child { border-bottom: 0; }
+.dom-row:hover { background: var(--panel-2); text-decoration: none; }
+.dom-name { font-weight: 600; }
+.dom-cadence { color: var(--muted); font-size: .78rem; font-family: var(--mono, monospace); }
+.spark { display: block; height: 24px; }
+.spark svg { width: 100%; height: 24px; display: block; }
+.spark .bar.on { fill: var(--accent); }
+.spark .bar.off { fill: #2f3542; }
+.dom-recent { font-variant-numeric: tabular-nums; color: var(--muted); font-size: .85rem;
+  min-width: 44px; text-align: right; }
+.dom-recent.live { color: var(--good); font-weight: 600; }
+.dom-recent .u { color: var(--muted); font-size: .72em; font-weight: 400; }
+
+.review-body { max-height: 260px; overflow-y: auto; }
+
 /* login */
 .login-body { display: grid; place-items: center; min-height: 100vh; }
 .login-card {

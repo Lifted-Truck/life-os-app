@@ -69,6 +69,7 @@ def test_views_render(life_os, monkeypatch):
     _login(c)
     for path, needle in [
         ("/", "Today"),
+        ("/overview", "Population frontier"),
         ("/domains", "career"),
         ("/domains/career", "Draft resume"),
         ("/logs", "Cadence health"),
