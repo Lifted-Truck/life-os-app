@@ -101,7 +101,10 @@ app = FastAPI(
     title="Life-OS",
     description="Personal automation layer — bot + scheduler + web hub.",
     version="0.2.0",
-    root_path=HUB_PREFIX,   # hidden-hub mount point (empty = domain root)
+    # NB: no FastAPI root_path. Caddy strips the hidden prefix (handle_path), so
+    # the app runs as a normal root app; all EXTERNAL links carry the prefix via
+    # {{ p }} / _redirect(). Setting root_path here made StaticFiles expect the
+    # prefix while Caddy stripped it → CSS 404. Keeping them decoupled is robust.
 )
 # Stable signing secret across restarts so cookies survive deploys. Falls back
 # to a dev value when the token is unset (auth disabled anyway in that case).
