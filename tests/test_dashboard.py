@@ -8,6 +8,9 @@ from datetime import date
 
 from fastapi.testclient import TestClient
 
+import dashboard.app as A   # for A.HUB_PREFIX — tests must be prefix-independent
+                            # (the VPS .env sets LIFE_OS_HUB_PREFIX; don't assume root)
+
 
 def _client(life_os, monkeypatch, token="secret123"):
     monkeypatch.setenv("LIFE_OS_ROOT", str(life_os))
@@ -22,7 +25,7 @@ def _client(life_os, monkeypatch, token="secret123"):
 def _login(client, token="secret123"):
     r = client.post("/login", data={"token": token}, follow_redirects=False)
     assert r.status_code == 303
-    assert r.headers["location"] == "/"
+    assert r.headers["location"] == A.HUB_PREFIX + "/"
 
 
 # --- health + auth ---------------------------------------------------------
@@ -38,7 +41,7 @@ def test_html_redirects_to_login_when_unauthed(life_os, monkeypatch):
     c = _client(life_os, monkeypatch)
     r = c.get("/", follow_redirects=False)
     assert r.status_code == 303
-    assert r.headers["location"] == "/login"
+    assert r.headers["location"] == A.HUB_PREFIX + "/login"
 
 
 def test_login_sets_cookie_and_grants_access(life_os, monkeypatch):
