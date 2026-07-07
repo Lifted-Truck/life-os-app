@@ -1,0 +1,48 @@
+#
+# Caddyfile.hidden — Life-OS mounted under a SECRET path prefix.
+#
+# Used instead of deploy/Caddyfile when LIFE_OS_HUB_PREFIX is set in .env, so
+# the domain root is free for a separate public site and the hub is reachable
+# only at mindlathe.xyz/<prefix>/…  (secret paths aren't published in
+# Certificate Transparency logs, unlike a subdomain would be).
+#
+# install-services.sh substitutes __DOMAIN__ and __HUB_PREFIX__.
+# The app must run with LIFE_OS_HUB_PREFIX=<prefix> so its links/redirects match.
+#
+
+www.__DOMAIN__ {
+    redir https://__DOMAIN__{uri} permanent
+}
+
+__DOMAIN__ {
+    encode gzip zstd
+
+    # The hub — strip the secret prefix, then proxy. The app knows its external
+    # prefix (LIFE_OS_HUB_PREFIX / root_path) so its own links stay correct.
+    handle_path __HUB_PREFIX__/* {
+        reverse_proxy localhost:8000
+    }
+
+    # Root + everything else: neutral holding page until the real site lands
+    # here. Reveals nothing about Life-OS. Replace this block when the public
+    # site is built (e.g. file_server or a proxy to the new app).
+    handle {
+        header Content-Type "text/html; charset=utf-8"
+        respond "<!doctype html><meta charset=utf-8><title>mindlathe</title><body style='font:16px system-ui;display:grid;place-items:center;height:90vh;margin:0;color:#555'>Coming soon.</body>" 200
+    }
+
+    log {
+        output file /var/log/caddy/access.log {
+            roll_size 10mb
+            roll_keep 10
+        }
+        format console
+    }
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options    "nosniff"
+        Referrer-Policy           "strict-origin-when-cross-origin"
+        -Server
+    }
+}

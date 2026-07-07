@@ -46,7 +46,7 @@
 
   <div class="frontier">
     {% for r in rows %}
-    <a class="dom-row" href="/domains/{{ r.domain }}">
+    <a class="dom-row" href="{{ p }}/domains/{{ r.domain }}">
       <i class="dot {{ r.state }}" title="{{ r.state }}"></i>
       <span class="dom-name">{{ r.domain }}</span>
       <span class="dom-cadence">{{ r.cadence or '—' }}</span>
@@ -78,6 +78,6 @@
 </section>
 
 <p class="muted small" style="text-align:center">
-  rev {{ pulse.rev }} · <a href="/system">system detail</a> · <a href="/">today's plan</a>
+  rev {{ pulse.rev }} · <a href="{{ p }}/system">system detail</a> · <a href="{{ p }}/">today's plan</a>
 </p>
 {% endblock %}

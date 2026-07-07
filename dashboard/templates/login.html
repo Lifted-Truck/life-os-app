@@ -4,10 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Life-OS · Log in</title>
-  <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}">
+  <link rel="stylesheet" href="{{ p }}/static/app.css">
 </head>
 <body class="login-body">
-  <form class="login-card" method="post" action="/login">
+  <form class="login-card" method="post" action="{{ p }}/login">
     <h1>Life&#8209;OS</h1>
     <p class="muted">Enter the dashboard token to continue.</p>
     {% if error %}<p class="error">{{ error }}</p>{% endif %}

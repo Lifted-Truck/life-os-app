@@ -60,8 +60,16 @@ for old in life-os-pull.service life-os-pull.timer life-os-push.service life-os-
 done
 
 echo "==> Installing Caddyfile for ${DOMAIN}..."
-# Render the Caddyfile template by substituting the domain.
-sudo bash -c "sed 's/__DOMAIN__/${DOMAIN}/g' '${DEPLOY_DIR}/Caddyfile' > /etc/caddy/Caddyfile"
+# Pick root vs hidden-prefix routing based on LIFE_OS_HUB_PREFIX in .env.
+HUB_PREFIX=$(grep -E '^LIFE_OS_HUB_PREFIX=' "${APP_DIR}/.env" 2>/dev/null \
+    | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" | sed 's:/*$::')
+if [[ -n "${HUB_PREFIX}" ]]; then
+    echo "    hidden mode — hub under ${HUB_PREFIX}/ , root serves a placeholder"
+    sudo bash -c "sed -e 's/__DOMAIN__/${DOMAIN}/g' -e 's|__HUB_PREFIX__|${HUB_PREFIX}|g' '${DEPLOY_DIR}/Caddyfile.hidden' > /etc/caddy/Caddyfile"
+else
+    echo "    root mode — hub served at the domain root"
+    sudo bash -c "sed 's/__DOMAIN__/${DOMAIN}/g' '${DEPLOY_DIR}/Caddyfile' > /etc/caddy/Caddyfile"
+fi
 
 echo "==> Reloading systemd + Caddy..."
 sudo systemctl daemon-reload

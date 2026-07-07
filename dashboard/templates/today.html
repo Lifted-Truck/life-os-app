@@ -26,7 +26,7 @@
       <h3 class="domain-h">{{ domain }}</h3>
       <ul class="tasks">
         {% for t in tasks %}
-        <li><a href="/domains/{{ t.domain }}">{{ t.title }}</a>
+        <li><a href="{{ p }}/domains/{{ t.domain }}">{{ t.title }}</a>
             <span class="muted small">urgency {{ "%.0f"|format(t.urgency) }}</span></li>
         {% endfor %}
       </ul>
@@ -62,7 +62,7 @@
           <td class="time">{{ a.block.start }}–{{ a.block.end }}</td>
           <td>{{ a.block.name }}</td>
           <td>{{ a.task.title if a.task else "—" }}</td>
-          <td>{% if a.task and a.task.domain %}<a href="/domains/{{ a.task.domain }}">{{ a.task.domain }}</a>{% else %}—{% endif %}</td>
+          <td>{% if a.task and a.task.domain %}<a href="{{ p }}/domains/{{ a.task.domain }}">{{ a.task.domain }}</a>{% else %}—{% endif %}</td>
         </tr>
         {% else %}
         <tr><td colspan="4" class="muted">No plan built for today.</td></tr>

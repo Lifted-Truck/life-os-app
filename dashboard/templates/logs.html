@@ -10,7 +10,7 @@
     <tbody>
       {% for s in summary %}
       <tr>
-        <td><a href="/domains/{{ s.domain }}">{{ s.domain }}</a></td>
+        <td><a href="{{ p }}/domains/{{ s.domain }}">{{ s.domain }}</a></td>
         <td>{{ s.week }}</td>
         <td>{{ s.last or "—" }}</td>
         <td>{{ s.days_since if s.days_since is not none else "—" }}</td>

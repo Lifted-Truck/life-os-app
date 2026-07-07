@@ -8,7 +8,7 @@
     <tbody>
       {% for d in domains %}
       <tr>
-        <td><a href="/domains/{{ d.name }}">{{ d.name }}</a>
+        <td><a href="{{ p }}/domains/{{ d.name }}">{{ d.name }}</a>
             {% if not d.has_tasks %}<span class="muted small">· logistics</span>{% endif %}</td>
         <td>{{ d.cadence or "—" }}</td>
         <td>{{ d.unit or "—" }}</td>

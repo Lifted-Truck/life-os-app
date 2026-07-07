@@ -49,7 +49,20 @@ from scheduler.urgency import cadence_debt_urgency
 from utils import get_life_os_root
 
 BASE = Path(__file__).resolve().parent
+
+# External URL prefix when the hub is mounted under a secret path (so the
+# domain root can host a separate public site). Env-driven; empty = served at
+# the domain root, which is the default for local dev and tests. Templates get
+# it as `{{ p }}`; redirects prepend it via _redirect().
+HUB_PREFIX = os.getenv("LIFE_OS_HUB_PREFIX", "").rstrip("/")
+
 templates = Jinja2Templates(directory=str(BASE / "templates"))
+templates.env.globals["p"] = HUB_PREFIX
+
+
+def _redirect(path: str, status: int = 303) -> RedirectResponse:
+    """Redirect to an internal path, honoring the hidden-hub prefix."""
+    return RedirectResponse(HUB_PREFIX + path, status_code=status)
 
 
 # --- auth ------------------------------------------------------------------
@@ -88,6 +101,7 @@ app = FastAPI(
     title="Life-OS",
     description="Personal automation layer — bot + scheduler + web hub.",
     version="0.2.0",
+    root_path=HUB_PREFIX,   # hidden-hub mount point (empty = domain root)
 )
 # Stable signing secret across restarts so cookies survive deploys. Falls back
 # to a dev value when the token is unset (auth disabled anyway in that case).
@@ -101,7 +115,7 @@ app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
 
 @app.exception_handler(_NotAuthenticated)
 async def _login_redirect(request: Request, exc: _NotAuthenticated):
-    return RedirectResponse("/login", status_code=303)
+    return _redirect("/login")
 
 
 # --- small helpers ---------------------------------------------------------
@@ -183,7 +197,7 @@ def _read_rev() -> str:
 @app.get("/login", response_class=HTMLResponse)
 def login_form(request: Request):
     if not _token() or request.session.get("auth"):
-        return RedirectResponse("/", status_code=303)
+        return _redirect("/")
     return templates.TemplateResponse(request, "login.html", {"error": None})
 
 
@@ -191,10 +205,10 @@ def login_form(request: Request):
 def login_submit(request: Request, token: str = Form(default="")):
     expected = _token()
     if not expected:
-        return RedirectResponse("/", status_code=303)
+        return _redirect("/")
     if hmac.compare_digest(token, expected):
         request.session["auth"] = True
-        return RedirectResponse("/", status_code=303)
+        return _redirect("/")
     return templates.TemplateResponse(
         request, "login.html", {"error": "Incorrect token."}, status_code=401,
     )
@@ -203,7 +217,7 @@ def login_submit(request: Request, token: str = Form(default="")):
 @app.get("/logout")
 def logout(request: Request):
     request.session.clear()
-    return RedirectResponse("/login", status_code=303)
+    return _redirect("/login")
 
 
 # --- HTML views ------------------------------------------------------------
