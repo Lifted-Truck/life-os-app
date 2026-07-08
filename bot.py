@@ -351,7 +351,7 @@ async def cmd_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(
             "Usage: /log [domain] <what you did>\n"
             "Records a completed entry in today's log. Add a leading domain "
-            "(e.g. /log novel wrote 500 words) so it counts toward that cadence."
+            "(e.g. /log writing wrote 500 words) so it counts toward that cadence."
         )
         return
 
@@ -416,7 +416,7 @@ EDIT_SYNTAX = (
     "*threshold*\n"
     "  `/edit threshold <domain>.<field> <value>`\n"
     "  Updates a numeric field in thresholds.yaml\n"
-    "  Example: `/edit threshold novel.target 600`\n\n"
+    "  Example: `/edit threshold writing.target 600`\n\n"
     "*/edit syntax* — show this message"
 )
 

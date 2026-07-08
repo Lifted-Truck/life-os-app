@@ -18,7 +18,7 @@ def test_compile_collects_all_sources(life_os):
     assert "career-001" in ids and "career-002" in ids and "career-003" in ids
     # Type 4 from thresholds (cadence domains only; upkeep as-scheduled excluded)
     assert "music-practice-recurring" in ids
-    assert "novel-recurring" in ids
+    assert "writing-recurring" in ids
     assert "career-recurring" in ids
     assert "fitness-recurring" in ids
     assert "upkeep-recurring" not in ids

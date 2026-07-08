@@ -40,7 +40,7 @@ from .urgency import cadence_debt_urgency, deadline_urgency
 THRESHOLD_DOMAIN_SLOTS = {
     "music-practice": ["practice-creative"],
     "production": ["practice-creative"],
-    "novel": ["deep-work"],
+    "writing": ["deep-work"],
     "reading": ["wind-down"],
     "fitness": ["exercise"],
     "career": ["deep-work", "admin"],

@@ -29,7 +29,7 @@ def test_hours_normalized_to_minutes():
 
 
 def test_words():
-    e = _entry("- **duration:** 500 words", "- **domain:** novel")
+    e = _entry("- **duration:** 500 words", "- **domain:** writing")
     assert e.amount == 500.0 and e.unit == "words"
 
 
@@ -59,8 +59,8 @@ def test_unparseable_duration_is_safe():
 
 
 def test_backward_compatible_fields():
-    e = _one(f"## {D.isoformat()}\n\n- **outcome:** done\n- **task:** novel-003\n")
-    assert e.task_id == "novel-003" and e.outcome == "done"
+    e = _one(f"## {D.isoformat()}\n\n- **outcome:** done\n- **task:** writing-003\n")
+    assert e.task_id == "writing-003" and e.outcome == "done"
     assert e.amount is None and e.unit is None
 
 

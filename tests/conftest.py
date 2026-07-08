@@ -42,7 +42,7 @@ def life_os(tmp_path: Path) -> Path:
           mandatory-weekly: 60
           unit: minutes
           cadence: daily
-        novel:
+        writing:
           min: 200
           target: 600
           unit: words
@@ -122,7 +122,7 @@ def life_os(tmp_path: Path) -> Path:
         ```
         """)
 
-    _write(root / "domains" / "novel" / "tasks.md", """\
+    _write(root / "domains" / "writing" / "tasks.md", """\
         next-id: 1
 
         # Novel — Task Records

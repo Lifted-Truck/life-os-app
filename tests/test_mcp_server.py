@@ -19,7 +19,7 @@ def _log_today(root, body):
 def test_list_domains(life_os, monkeypatch):
     _use(life_os, monkeypatch)
     doms = M.list_domains()
-    assert "music-practice" in doms and "novel" in doms
+    assert "music-practice" in doms and "writing" in doms
 
 
 def test_get_domain_progress(life_os, monkeypatch):
@@ -46,8 +46,8 @@ def test_bad_bucket_raises(life_os, monkeypatch):
 def test_recent_activity(life_os, monkeypatch):
     _use(life_os, monkeypatch)
     _log_today(life_os, "- **duration:** 500 words\n- **outcome:** done\n"
-                        "- **domain:** novel")
-    acts = M.get_recent_activity("novel", limit=5)
+                        "- **domain:** writing")
+    acts = M.get_recent_activity("writing", limit=5)
     assert acts and acts[0]["amount"] == 500 and acts[0]["unit"] == "words"
 
 

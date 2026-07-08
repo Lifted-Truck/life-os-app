@@ -25,7 +25,7 @@ def E(d, domain=None, outcome="done", amount=None, unit=None, task_id=None):
 def test_totals_sums_amount_and_infers_unit():
     es = [E(T, "music-practice", amount=30, unit="minutes"),
           E(T - DAY, "music-practice", amount=20, unit="minutes"),
-          E(T, "novel", amount=500, unit="words")]
+          E(T, "writing", amount=500, unit="words")]
     t = totals(es, "music-practice", T - 7 * DAY, T)
     assert t["amount"] == 50 and t["unit"] == "minutes"
     assert t["completions"] == 2 and t["entries"] == 2
@@ -96,4 +96,4 @@ def test_all_domains_summary_includes_logless_domains(life_os):
     rows = all_domains_summary(life_os, days=7, today=T)
     mp = next(r for r in rows if r["domain"] == "music-practice")
     assert mp["totals"]["completions"] == 1 and mp["cadence"] == "daily"
-    assert any(r["domain"] == "novel" for r in rows)   # from thresholds, no logs
+    assert any(r["domain"] == "writing" for r in rows)   # from thresholds, no logs

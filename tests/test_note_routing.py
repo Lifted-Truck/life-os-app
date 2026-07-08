@@ -14,13 +14,13 @@ import bot
 
 
 def test_extract_domain_recognizes_dev_keyword():
-    domain, body = bot._extract_domain(["dev", "fix", "the", "thing"], known_domains={"novel", "career"})
+    domain, body = bot._extract_domain(["dev", "fix", "the", "thing"], known_domains={"writing", "career"})
     assert domain == "dev"
     assert body == "fix the thing"
 
 
 def test_extract_domain_falls_back_blank_when_not_a_tag():
-    domain, body = bot._extract_domain(["random", "musing"], known_domains={"novel"})
+    domain, body = bot._extract_domain(["random", "musing"], known_domains={"writing"})
     assert domain == "" and body == "random musing"
 
 
@@ -36,7 +36,7 @@ def test_write_ingest_note_routes_dev_to_dev_subfolder(tmp_path, monkeypatch):
 
 def test_write_ingest_note_keeps_life_notes_in_main_ingest(tmp_path, monkeypatch):
     monkeypatch.setenv("LIFE_OS_ROOT", str(tmp_path))
-    path = utils.write_ingest_note("novel", "ideas for chapter 3")
+    path = utils.write_ingest_note("writing", "ideas for chapter 3")
     assert path.startswith("ingest/") and not path.startswith("ingest/dev/")
     assert (tmp_path / path).is_file()
 

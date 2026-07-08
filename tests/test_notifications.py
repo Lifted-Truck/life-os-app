@@ -21,7 +21,7 @@ def _result(blocks_with_task):
 B_MORNING = {"name": "Morning Pages & Coffee", "start": "07:00", "end": "08:00", "slot": None}
 B_DEEP = {"name": "Deep Work 1", "start": "08:00", "end": "10:00", "slot": "deep-work"}
 B_LUNCH = {"name": "Lunch", "start": "12:30", "end": "13:30", "slot": None}
-TASK = SimpleNamespace(id="novel-001", title="novel")
+TASK = SimpleNamespace(id="writing-001", title="writing")
 TODAY = date(2026, 5, 30)
 
 
