@@ -16,12 +16,17 @@ Register with Claude (Claude Desktop config / Claude Code MCP config):
       "mcpServers": {
         "life-os": {
           "command": "/Users/machinepriest/Documents/Claude/life-os/life-os-app/venv/bin/python",
-          "args": ["/Users/machinepriest/Documents/Claude/life-os/life-os-app/mcp_server.py"]
+          "args": ["/Users/machinepriest/Documents/Claude/life-os/life-os-app/mcp_server.py"],
+          "env": { "LIFE_OS_WRITE_TOKEN": "<the VPS write token>" }
         }
       }
     }
-LIFE_OS_ROOT is read from the app's .env (via utils), so the server finds the
-data tree without extra config.
+LIFE_OS_ROOT is read from the app's .env (via utils), so the READ tools find the
+data tree without extra config. The WRITE tools (log_activity, capture_note,
+capture_review, add_inbox) POST to the VPS write API and need LIFE_OS_WRITE_TOKEN
+in this server's env (matching /home/life/app/.env on the VPS); without it the
+server is read-only. Optional LIFE_OS_WRITE_URL overrides the default
+https://mindlathe.xyz/lathe/api/write.
 """
 from __future__ import annotations
 
