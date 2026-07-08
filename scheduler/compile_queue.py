@@ -22,8 +22,9 @@ from typing import Optional
 import yaml
 
 from .constants import IMPORTANCE_WEIGHT, MANDATORY_WEEKLY_BOOST
-from .days import expand_days
+from .days import expand_days, today_token
 from .fileio import atomic_write_text
+from .restday import closed_slots_today, is_screen_free_blocked
 from .logs import (
     completions_this_week,
     done_task_ids,
@@ -207,6 +208,10 @@ def compile_queue(root: Path, today: Optional[date] = None) -> tuple[list, list]
                 lint.append(LintIssue("error", "thresholds.yaml",
                                       f"domain '{domain}' {e}"))
 
+    # Screen-free / rest-day policy (config-driven): the set of slots closed
+    # today, if today is a configured screen-free day. Empty on a normal day.
+    closed_slots = closed_slots_today(thresholds.get("config"), today)
+
     # Type 3 — tasks.md per domain
     domains_dir = root / "domains"
     if domains_dir.is_dir():
@@ -256,6 +261,10 @@ def compile_queue(root: Path, today: Optional[date] = None) -> tuple[list, list]
         unmet = [d for d in t.depends_on if d not in done]
         if unmet:
             reasons.append("depends-on: " + ",".join(unmet))
+        # Screen-free day: block tasks whose every slot is closed today. Tasks
+        # with an open slot (e.g. exercise) or no slot (anchors) are unaffected.
+        if is_screen_free_blocked(t.placement.slots, closed_slots):
+            reasons.append(f"screen-free ({today_token(today)})")
         t.eligible = not reasons
         t.blocked_reason = "; ".join(reasons) or None
 
