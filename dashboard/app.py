@@ -115,6 +115,10 @@ app.add_middleware(
 )
 app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
 
+# Write API (append-only primitives, gated by LIFE_OS_WRITE_TOKEN) — write-mcp.md
+from dashboard.write import router as _write_router  # noqa: E402
+app.include_router(_write_router)
+
 
 @app.exception_handler(_NotAuthenticated)
 async def _login_redirect(request: Request, exc: _NotAuthenticated):

@@ -88,5 +88,59 @@ def get_recent_activity(domain: str, limit: int = 10) -> list:
     ]
 
 
+# --- write tools (thin HTTPS clients to the VPS write API) -----------------
+# These RECORD to Life-OS. They post to the write API (single write authority),
+# so they need LIFE_OS_WRITE_TOKEN configured in THIS MCP's env; without it the
+# server is read-only. Base URL defaults to the live hidden path; override with
+# LIFE_OS_WRITE_URL for a different host.
+import os
+
+_WRITE_BASE = os.getenv(
+    "LIFE_OS_WRITE_URL", "https://mindlathe.xyz/lathe/api/write").rstrip("/")
+
+
+def _write(path: str, payload: dict) -> dict:
+    token = os.getenv("LIFE_OS_WRITE_TOKEN", "").strip()
+    if not token:
+        raise ValueError(
+            "recording is disabled: set LIFE_OS_WRITE_TOKEN in this MCP's env "
+            "to enable the write tools")
+    import httpx
+    resp = httpx.post(f"{_WRITE_BASE}/{path}", json=payload,
+                      headers={"Authorization": f"Bearer {token}"}, timeout=15)
+    if resp.status_code >= 400:
+        raise ValueError(f"write API {resp.status_code}: {resp.text[:200]}")
+    return resp.json()
+
+
+@mcp.tool()
+def log_activity(domain: str, outcome: str = "done", amount: float = None,
+                 unit: str = None, covered: str = None, task: str = None) -> dict:
+    """Record a completed activity to today's log — e.g. music-practice, 30,
+    "minutes". `amount`+`unit` populate the quantitative field that feeds the
+    progress graphs. outcome ∈ done|partial|missed|rescheduled."""
+    return _write("log", {"domain": domain, "outcome": outcome, "amount": amount,
+                          "unit": unit, "covered": covered, "task": task})
+
+
+@mcp.tool()
+def capture_note(text: str, domain: str = None) -> dict:
+    """Save a quick ingest note, optionally tagged to a domain."""
+    return _write("note", {"text": text, "domain": domain})
+
+
+@mcp.tool()
+def capture_review(text: str, kind: str = "daily") -> dict:
+    """Append a messy daily|weekly review stanza (same store the bot's /review
+    writes to)."""
+    return _write("review", {"text": text, "kind": kind})
+
+
+@mcp.tool()
+def add_inbox(text: str, due: str = None) -> dict:
+    """Add an inbox item; optional `due` like 'hard 2026-07-15'."""
+    return _write("inbox", {"text": text, "due": due})
+
+
 if __name__ == "__main__":
     mcp.run()   # stdio transport
