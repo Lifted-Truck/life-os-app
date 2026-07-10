@@ -48,6 +48,7 @@ THRESHOLD_DOMAIN_SLOTS = {
     "meals": ["admin"],
     "upkeep": ["admin"],   # chores cluster under Admin/Career (template.md)
     "coding": ["deep-work"],   # daily deep-work cadence (walkthrough 2026-07-08)
+    "social": ["admin"],   # weekly initiate-a-connection nudge (walkthrough 2026-07-10)
 }
 
 DEFAULT_TASK4_DURATION = 60   # minutes, when unit is not "minutes"
