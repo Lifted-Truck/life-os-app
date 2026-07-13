@@ -155,3 +155,17 @@ details.logday:last-child { border-bottom: 0; }
   background: var(--accent); color: #0b1020; font-weight: 600; font-size: 1rem; cursor: pointer;
 }
 .login-card .error { color: var(--hot); font-size: .9rem; margin: 6px 0 0; }
+
+/* domain umbrella grouping (presentation overlay) */
+tr.group-head td {
+  color: var(--accent); font-weight: 700; font-size: .72rem;
+  text-transform: uppercase; letter-spacing: .06em;
+  padding: 15px 10px 5px; border-bottom: 1px solid var(--line);
+}
+tr.group-head:first-child td { padding-top: 4px; }
+.frontier .group-label {
+  color: var(--accent); font-weight: 700; font-size: .72rem;
+  text-transform: uppercase; letter-spacing: .06em;
+  margin: 16px 0 6px; padding-top: 10px; border-top: 1px solid var(--line);
+}
+.frontier .group-label:first-child { border-top: 0; padding-top: 0; margin-top: 2px; }

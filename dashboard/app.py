@@ -31,6 +31,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from commands_doc import COMMAND_REGISTRY
+from dashboard.groups import group_rows
 from metrics.aggregate import all_domains_summary, domain_progress, series
 from scheduler.domains import list_domains, read_thresholds
 from scheduler.logs import read_log_entries
@@ -270,8 +271,10 @@ def domains_view(request: Request):
             "week": completions_this_week(entries, name, d),
             "has_tasks": (root / "domains" / name / "tasks.md").exists(),
         })
+    groups = group_rows(rows, "name", root)
     return templates.TemplateResponse(
-        request, "domains.html", {"nav": "domains", "domains": rows})
+        request, "domains.html",
+        {"nav": "domains", "groups": groups, "domains": rows})
 
 
 @app.get("/domains/{name}", response_class=HTMLResponse,
@@ -448,9 +451,10 @@ def overview(request: Request):
         "sync_ok": sync_age is not None and sync_age <= 1200,
         "rev": _read_rev(),
     }
+    groups = group_rows(rows, "domain", root)
     return templates.TemplateResponse(
         request, "overview.html",
-        {"nav": "overview", "rows": rows, "pulse": pulse,
+        {"nav": "overview", "rows": rows, "groups": groups, "pulse": pulse,
          "latest_review": latest_review, "spark_days": SPARK_DAYS})
 
 

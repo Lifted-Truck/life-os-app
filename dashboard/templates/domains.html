@@ -6,7 +6,9 @@
   <table class="grid">
     <thead><tr><th>Domain</th><th>Cadence</th><th>Unit</th><th>This week</th><th>Last done</th></tr></thead>
     <tbody>
-      {% for d in domains %}
+      {% for g in groups %}
+      <tr class="group-head"><td colspan="5">{{ g.label }}</td></tr>
+      {% for d in g.rows %}
       <tr>
         <td><a href="{{ p }}/domains/{{ d.name }}">{{ d.name }}</a>
             {% if not d.has_tasks %}<span class="muted small">· logistics</span>{% endif %}</td>
@@ -15,6 +17,7 @@
         <td>{{ d.week }}</td>
         <td>{{ d.last or "—" }}</td>
       </tr>
+      {% endfor %}
       {% endfor %}
     </tbody>
   </table>
