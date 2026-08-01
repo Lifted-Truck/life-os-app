@@ -141,3 +141,37 @@ def test_api_metrics_bad_bucket_422(life_os, monkeypatch):
     c = _client(life_os, monkeypatch)
     assert c.get("/api/metrics/music-practice?bucket=month",
                  headers=H).status_code == 422
+
+
+# --- read API accepts a session cookie too (frontend-brief §1) --------------
+# Rationale: the browser SPA shouldn't embed the bearer token in client JS.
+# /api/* is read-only GET, so cookie acceptance is safe there; the WRITE API
+# stays Bearer-only (cookie auth on state-changing routes would be CSRF-able).
+
+def test_api_accepts_session_cookie(life_os, monkeypatch):
+    c = _client(life_os, monkeypatch)
+    assert c.get("/api/today").status_code == 401     # no credential
+    _login(c)                                          # cookie session
+    assert c.get("/api/today").status_code == 200
+    assert c.get("/api/metrics").status_code == 200
+
+
+def test_api_still_accepts_bearer_token(life_os, monkeypatch):
+    c = _client(life_os, monkeypatch)                  # no login → no cookie
+    r = c.get("/api/today", headers={"Authorization": "Bearer secret123"})
+    assert r.status_code == 200
+
+
+def test_api_rejects_bad_bearer_without_session(life_os, monkeypatch):
+    c = _client(life_os, monkeypatch)
+    assert c.get("/api/today",
+                 headers={"Authorization": "Bearer wrong"}).status_code == 401
+
+
+def test_write_api_does_not_accept_session_cookie(life_os, monkeypatch):
+    """CSRF boundary: a logged-in session must NOT grant write access."""
+    monkeypatch.setenv("LIFE_OS_WRITE_TOKEN", "wtok")
+    c = _client(life_os, monkeypatch)
+    _login(c)
+    r = c.post("/api/write/inbox", json={"text": "should not be allowed"})
+    assert r.status_code == 401

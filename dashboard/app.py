@@ -73,17 +73,32 @@ def _token() -> str:
     return os.getenv("LIFE_OS_DASHBOARD_TOKEN", "").strip()
 
 
-def require_token(authorization: str | None = Header(default=None)) -> None:
-    """Header-based gate for /api/* — Authorization: Bearer <token>."""
+def require_token(request: Request,
+                  authorization: str | None = Header(default=None)) -> None:
+    """Gate for the READ API (/api/*): a Bearer token OR a logged-in session.
+
+    Two callers, two credentials:
+      * programmatic (MCP, scripts, curl) → `Authorization: Bearer <token>`
+      * the browser SPA → the same session cookie the HTML pages already use,
+        so the token never has to be embedded in client-side JS.
+
+    Cookie acceptance is safe HERE because /api/* is read-only GET and the
+    session cookie is SameSite=lax. It is deliberately NOT extended to the write
+    API (dashboard/write.py stays Bearer-only) — accepting a cookie on
+    state-changing endpoints would make them CSRF-able.
+    """
     expected = _token()
     if not expected:
         return
-    if not authorization or not hmac.compare_digest(authorization, f"Bearer {expected}"):
-        raise HTTPException(
-            status_code=401,
-            detail="missing or invalid Authorization header",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    if authorization and hmac.compare_digest(authorization, f"Bearer {expected}"):
+        return
+    if request.session.get("auth"):
+        return
+    raise HTTPException(
+        status_code=401,
+        detail="missing or invalid Authorization header (or log in for a session)",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 class _NotAuthenticated(Exception):
