@@ -19,11 +19,10 @@ from __future__ import annotations
 import hmac
 import os
 import time
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 import markdown as _md
-import yaml
 from fastapi import Depends, FastAPI, Form, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -32,7 +31,9 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from commands_doc import COMMAND_REGISTRY
 from dashboard.groups import group_rows
-from metrics.aggregate import all_domains_summary, domain_progress, series
+from dashboard.overview_data import (age_label, build_overview, read_rev,
+                                     sync_age_seconds)
+from metrics.aggregate import all_domains_summary, domain_progress
 from scheduler.domains import list_domains, read_thresholds
 from scheduler.logs import read_log_entries
 from scheduler.compile_queue import load_queue
@@ -176,43 +177,19 @@ def _group_by_domain(tasks: list) -> list[tuple[str, list]]:
 
 
 # --- health (unauthenticated; auto-deploy polls its rev) -------------------
-
-def _sync_heartbeat_path() -> Path:
-    """Where sync-data-tree.sh records its last fully-successful cycle."""
-    return Path.home() / ".cache" / "life-os" / "last-sync"
-
-
-def _sync_age_seconds():
-    """Seconds since the data-tree sync last succeeded, or None if unknown."""
-    try:
-        last = int(_sync_heartbeat_path().read_text(encoding="utf-8").strip())
-    except (OSError, ValueError):
-        return None
-    return max(0, int(time.time()) - last)
-
+# The sync/rev/label helpers live in dashboard/overview_data.py (single home,
+# shared with the Overview payload). Imported at the top of this module.
 
 @app.get("/health")
 def health() -> dict:
-    age = _sync_age_seconds()
+    age = sync_age_seconds()
     return {
         "status": "ok",
-        "rev": _read_rev(),
+        "rev": read_rev(),
         # None until the first sync heartbeat exists (fresh box / local dev).
         "sync_age_seconds": age,
         "sync_ok": age is not None and age <= 1200,
     }
-
-
-def _read_rev() -> str:
-    """Best-effort short git SHA of the running checkout."""
-    try:
-        head = BASE.parent / ".git" / "HEAD"
-        ref = head.read_text(encoding="utf-8").strip()
-        if ref.startswith("ref: "):
-            return (BASE.parent / ".git" / ref[5:]).read_text(encoding="utf-8").strip()[:8]
-        return ref[:8]
-    except OSError:
-        return "unknown"
 
 
 # --- login / logout --------------------------------------------------------
@@ -363,7 +340,7 @@ def system_view(request: Request):
         groups[seen[group]][1].append((cmd, desc))
     ctx = {
         "request": request, "nav": "system",
-        "rev": _read_rev(), "mode": mode, "generated": generated, "lint": lint,
+        "rev": read_rev(), "mode": mode, "generated": generated, "lint": lint,
         "command_groups": groups,
         "handoff_html": _render_md(_safe_read(root / "dev" / "handoff.md")),
         "todo_html": _render_md(_safe_read(root / "dev" / "TODO.md")),
@@ -374,77 +351,20 @@ def system_view(request: Request):
 
 # --- overview (the live system map) ----------------------------------------
 
-def _age_label(sec) -> str:
-    if sec is None:
-        return "unknown"
-    if sec < 90:
-        return f"{sec}s ago"
-    if sec < 5400:
-        return f"{sec // 60} min ago"
-    return f"{sec // 3600}h ago"
-
-
-def _walkthrough_status(root: Path) -> dict:
-    """domain -> 'populated' | 'started' from dev/walkthrough-state.yaml."""
-    try:
-        data = yaml.safe_load(
-            (root / "dev" / "walkthrough-state.yaml").read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError):
-        return {}
-    out = {}
-    for dom, rec in (data or {}).items():
-        if not isinstance(rec, dict):
-            continue
-        status = str(rec.get("status", ""))
-        done = rec.get("scopes_done") or []
-        out[dom] = "populated" if status.upper().startswith("POPULATED") or len(done) >= 5 \
-            else "started"
-    return out
-
-
 @app.get("/overview", response_class=HTMLResponse, dependencies=[Depends(require_session)])
 def overview(request: Request):
+    """The live system map. Shares build_overview() with GET /api/overview so
+    this page and the React client cannot drift (BR-1)."""
     root = get_life_os_root()
-    today = date.today()
-    entries = read_log_entries(root)
-    th = read_thresholds(root)
-    walk = _walkthrough_status(root)
-    domains = list_domains(root)
+    data = build_overview(root)
 
-    SPARK_DAYS = 21
-    rows = []
-    for d in domains:
-        ser = series(entries, d, today - timedelta(days=SPARK_DAYS - 1), today, "day")
-        counts = [p["completions"] for p in ser["points"]]
-        cfg = th.get(d, {})
-        rows.append({
-            "domain": d,
-            "state": walk.get(d, "untouched"),   # populated | started | untouched
-            "cadence": cfg.get("cadence"),
-            "has_cadence": bool(cfg.get("cadence")),
-            "spark": counts,
-            "spark_max": max(counts) if counts else 0,
-            "recent": sum(counts[-7:]),
-        })
-    # frontier first: populated on top, then started, then untouched; then name
-    order = {"populated": 0, "started": 1, "untouched": 2}
-    rows.sort(key=lambda r: (order[r["state"]], r["domain"]))
-
-    populated_n = sum(1 for r in rows if r["state"] == "populated")
-    mode = load_mode(root)
-    try:
-        _t, lint, generated = load_queue(root)
-    except OSError:
-        lint, generated = [], None
-
-    # logging streak (any completion) + latest review capture
-    logged_days = sorted({e.date for e in entries if e.outcome in ("done", "partial")})
-    streak = 0
-    probe = today
-    logged_set = set(logged_days)
-    while probe in logged_set:
-        streak += 1
-        probe -= timedelta(days=1)
+    # Template-only presentation extras the JSON contract deliberately omits.
+    rows = [dict(r, spark_max=max(r["spark"]) if r["spark"] else 0,
+                 has_cadence=bool(r["cadence"]))
+            for r in data["rows"]]
+    p = data["pulse"]
+    pulse = {**p, "mode": p["plan_mode"],
+             "sync_label": age_label(p["sync_age_seconds"])}
 
     latest_review = None
     rdir = root / "daily" / "reviews"
@@ -454,23 +374,11 @@ def overview(request: Request):
             latest_review = {"name": files[-1].stem,
                              "html": _render_md(files[-1].read_text(encoding="utf-8"))}
 
-    sync_age = _sync_age_seconds()
-    pulse = {
-        "populated": populated_n,
-        "total": len(rows),
-        "mode": mode["plan_mode"],
-        "lint_warn": sum(1 for i in lint if i.level == "warning"),
-        "lint_err": sum(1 for i in lint if i.level == "error"),
-        "streak": streak,
-        "sync_label": _age_label(sync_age),
-        "sync_ok": sync_age is not None and sync_age <= 1200,
-        "rev": _read_rev(),
-    }
     groups = group_rows(rows, "domain", root)
     return templates.TemplateResponse(
         request, "overview.html",
         {"nav": "overview", "rows": rows, "groups": groups, "pulse": pulse,
-         "latest_review": latest_review, "spark_days": SPARK_DAYS})
+         "latest_review": latest_review, "spark_days": data["spark_days"]})
 
 
 # --- JSON API (header-token auth; preserves the old / and /today shapes) ---
@@ -484,8 +392,21 @@ def api_index() -> dict:
         "date": date.today().isoformat(),
         "plan_mode": mode["plan_mode"],
         "haiku_phrasing": mode["haiku_phrasing"],
-        "links": ["/api/today", "/health"],
+        "links": ["/api/today", "/api/overview", "/api/metrics", "/health"],
     }
+
+
+@app.get("/api/overview", dependencies=[Depends(require_token)])
+def api_overview() -> dict:
+    """The whole Overview payload in one request (BR-1 + BR-2).
+
+    Same build_overview() the server-rendered /overview page uses, so the two
+    surfaces cannot drift. Carries the umbrella grouping (BR-2), so clients read
+    it from the API instead of mirroring dev/domain-groups.yaml. `rows` arrive in
+    DISPLAY order (populated → started → untouched, then name) — a client must
+    not re-sort, and must not recompute any of this.
+    """
+    return build_overview(get_life_os_root())
 
 
 @app.get("/api/today", dependencies=[Depends(require_token)])
