@@ -1,0 +1,29 @@
+# CI mirrors the Stop hook: ./verify fast, nothing more. Economical per
+# autonomous Decision 31 — PR + push-to-master, superseded runs cancelled,
+# docs-only changes skipped. The leak_gate and ip_gate run here on a bare
+# runner (no venv), so they block a merge even when tests are skipped.
+name: ci
+on:
+  push:
+    branches: [master]
+    paths-ignore: ["**.md", "!deploy/README.md", "!CLAUDE.md"]   # docs carried the leaks — keep gating them
+  pull_request:
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: venv + deps (so tests run, not just the gates)
+        run: |
+          python -m venv venv
+          venv/bin/pip install -q -r requirements.txt pytest
+      - name: ./verify fast
+        run: |
+          chmod +x verify
+          ./verify fast

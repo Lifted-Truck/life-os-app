@@ -11,12 +11,13 @@ behavior deterministically; the consuming tool's AI decides what to do with it.
 Run (stdio):
     venv/bin/python mcp_server.py
 
-Register with Claude (Claude Desktop config / Claude Code MCP config):
+Register with Claude (Claude Desktop config / Claude Code MCP config). MCP
+configs need ABSOLUTE paths (no ~ expansion) — substitute your clone location:
     {
       "mcpServers": {
         "life-os": {
-          "command": "/Users/machinepriest/Documents/Claude/life-os/life-os-app/venv/bin/python",
-          "args": ["/Users/machinepriest/Documents/Claude/life-os/life-os-app/mcp_server.py"],
+          "command": "<abs path to clone>/venv/bin/python",
+          "args": ["<abs path to clone>/mcp_server.py"],
           "env": { "LIFE_OS_WRITE_TOKEN": "<the VPS write token>" }
         }
       }

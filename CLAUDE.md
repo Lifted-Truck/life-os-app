@@ -39,8 +39,8 @@ contain no LLM calls. Skills / bot / API record and propose; the engine decides.
   lock). Don't add raw `write_text`/`open("a")` on the data tree.
 - **Derived state** (`schedule/queue.yaml`, `today-state.yaml`) is **untracked**
   and self-heals; don't re-track it.
-- **SSH** to the VPS: `ssh life@162.222.206.53` (read + ops/deploy authorized;
-  `life` has passwordless sudo).
+- **SSH** to the VPS: `ssh life@<VPS_IP>` — the address lives in your
+  `~/.ssh/config`, never in this repo (public). `life` has passwordless sudo.
 
 <!-- KNOWLEDGE-LOOP:START -->
 ## Self-Improving Knowledge Loop

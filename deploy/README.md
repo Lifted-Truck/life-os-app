@@ -6,7 +6,7 @@ fresh Ionos Ubuntu 24.04 VPS.
 | | Value |
 |---|---|
 | Domain | `mindlathe.xyz` |
-| VPS IPv4 | `162.222.206.53` |
+| VPS IPv4 | `<VPS_IP>` |
 | OS | Ubuntu 24.04 LTS |
 | App repo | `https://github.com/Lifted-Truck/life-os-app` |
 | Data tree | Private GitHub repo (to be created — see Phase 3) |
@@ -27,10 +27,10 @@ Open **PowerShell** (not WSL — keep the key on Windows so RDP/Explorer can
 manage it):
 
 ```powershell
-ssh-keygen -t ed25519 -C "sport@mindlathe.xyz"
+ssh-keygen -t ed25519 -C "<you>@<your-domain>"
 ```
 
-Accept the default path (`C:\Users\sport\.ssh\id_ed25519`). Set a
+Accept the default path (`C:\Users\<you>\.ssh\id_ed25519`). Set a
 passphrase if you want — ssh-agent will cache it.
 
 Print the public key (you'll paste this into the bootstrap script):
@@ -54,8 +54,8 @@ Add (or edit) these records:
 
 | Type | Host | Value | TTL |
 |---|---|---|---|
-| A | `@`   | `162.222.206.53` | 1h |
-| A | `www` | `162.222.206.53` | 1h |
+| A | `@`   | `<VPS_IP>` | 1h |
+| A | `www` | `<VPS_IP>` | 1h |
 
 Delete any conflicting old records pointing at parking pages or the prior host.
 
@@ -65,7 +65,7 @@ Delete any conflicting old records pointing at parking pages or the prior host.
 nslookup mindlathe.xyz
 ```
 
-The answer section should show `162.222.206.53`. Don't proceed until it does
+The answer section should show `<VPS_IP>`. Don't proceed until it does
 — Caddy's automatic HTTPS will fail otherwise.
 
 ---
@@ -114,7 +114,7 @@ if you add it to GitHub at github.com → Settings → SSH and GPG keys.)
 SSH in as root using the password Ionos provided:
 
 ```powershell
-ssh root@162.222.206.53
+ssh root@<VPS_IP>
 ```
 
 Get the bootstrap script onto the server. **Don't pipe-curl from chat** —
@@ -122,13 +122,13 @@ copy it via SCP so you can review:
 
 ```powershell
 # from a SECOND PowerShell window (keep the SSH session open)
-scp C:\Users\sport\Documents\life-os-app\deploy\bootstrap.sh root@162.222.206.53:/root/
+scp C:\Users\<you>\path\to\life-os-app\deploy\bootstrap.sh root@<VPS_IP>:/root/
 ```
 
 Back in the SSH session, run it with your pubkey from Phase 1:
 
 ```bash
-PUBKEY="ssh-ed25519 AAAA…YOUR_KEY_HERE… sport@mindlathe.xyz" bash /root/bootstrap.sh
+PUBKEY="ssh-ed25519 AAAA…YOUR_KEY_HERE… <you>@<your-domain>" bash /root/bootstrap.sh
 ```
 
 The script will: update packages → install Python 3.12 + Caddy + ufw +
@@ -138,7 +138,7 @@ login, no passwords) → enable the firewall.
 **Verify** (from a NEW PowerShell window — do NOT close the root SSH yet):
 
 ```powershell
-ssh life@162.222.206.53
+ssh life@<VPS_IP>
 ```
 
 You should get a shell as `life` with no password prompt. If that works,

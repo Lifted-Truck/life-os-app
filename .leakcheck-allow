@@ -1,0 +1,8 @@
+# leak_gate allowlist. Exemptions are commits; a security-sensitive one belongs
+# in DECISIONS.
+#
+# NOTHING IS ALLOWLISTED BY PATH HERE, deliberately. The first draft exempted
+# deploy/README.md and mcp_server.py wholesale — which would have re-hidden
+# the exact files that carried this repo's real leaks (a VPS IP, two
+# usernames) had they come back. Instead the gate below treats the deploy
+# box's service account as a placeholder-class prefix.
