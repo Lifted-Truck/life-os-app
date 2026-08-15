@@ -58,3 +58,29 @@ Template:
   `50-cloud-init.conf`, a sed on the main `sshd_config` alone makes `sshd -T`
   report the sed'd value, this lesson is wrong.
 - **supersedes:** —
+
+### [L0003] Behind a reverse proxy, rate-limit on X-Forwarded-For — and keep test client keys IP-free
+- **tier:** candidate
+- **added:** 2026-08-15
+- **tags:** security, test-harness, deploy-ops
+- **lesson:** Two coupled facts. (1) Behind Caddy, `request.client.host` is the
+  proxy hop for EVERY request (observed live: the VPS's own address), so a
+  per-client rate limiter keyed on it puts all callers in one bucket — a
+  stranger's brute-force would lock the owner out. Key on the first
+  `X-Forwarded-For` hop instead; this is safe ONLY while the app port is
+  unreachable except via the proxy (ufw), because otherwise XFF is spoofable.
+  (2) When testing such a limiter in a PUBLIC repo that runs an IP-literal
+  leak gate, do NOT use IP-shaped test values — even RFC 5737 documentation
+  addresses trip the gate. The limiter keys on an opaque string, so opaque
+  labels (`"attacker-1"`, `"owner"`) test the same property. Adding an
+  allowlist exemption for tests would teach the gate to ignore exactly the
+  files that most often carry a leak; changing the tests is the right fix.
+- **evidence:** 2026-08-15, write-API rate cap (Phase 3). First test draft
+  used `203.0.113.x`/`198.51.100.x`; `./verify` ip_gate went red on 13 lines;
+  relabelling to opaque keys turned it green with identical coverage. Live
+  probe through Caddy: 10×401 then 429 from my source while a legit write from
+  a different source returned 200 — the XFF keying works end-to-end.
+- **falsifier:** If `request.client.host` behind Caddy ever reports the true
+  client (e.g. proxy protocol enabled), keying on XFF becomes unnecessary; if
+  the ip_gate is changed to exempt RFC 5737 ranges, the second half is moot.
+- **supersedes:** —

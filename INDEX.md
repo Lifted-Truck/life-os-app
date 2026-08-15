@@ -13,3 +13,6 @@ LIBRARY by default.
 - **[L0002]** sshd hardening: cloud-init drop-ins are Included FIRST and win over
   a sed on the main file — write a `00-*` drop-in and assert with `sshd -T`
   — tags: `deploy-ops`, `security`
+- **[L0003]** Rate-limit on X-Forwarded-For behind the proxy (client.host is the
+  proxy); test with opaque keys, not IP literals, so the public repo's ip_gate stays
+  meaningful — tags: `security`, `test-harness`, `deploy-ops`
