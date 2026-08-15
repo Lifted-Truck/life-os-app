@@ -123,6 +123,13 @@ def _write(path: str, payload: dict) -> dict:
     import httpx
     resp = httpx.post(f"{_WRITE_BASE}/{path}", json=payload,
                       headers={"Authorization": f"Bearer {token}"}, timeout=15)
+    if resp.status_code == 429:
+        # Rate-limited (Phase 3). Surface the wait explicitly so the calling
+        # agent backs off instead of retrying blindly into the same window.
+        wait = resp.headers.get("Retry-After", "?")
+        raise ValueError(
+            f"write API rate-limited: retry after ~{wait}s. Do not retry in a "
+            "loop — the limit is per client and blind retries only extend it.")
     if resp.status_code >= 400:
         raise ValueError(f"write API {resp.status_code}: {resp.text[:200]}")
     return resp.json()

@@ -18,10 +18,11 @@ import os
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel
 
 from bot_handlers.review import append_review
+from dashboard.ratelimit import enforce_pre_auth, enforce_write, record_auth_failure
 from scheduler.domains import list_domains
 from utils import append_inbox, append_log_entry, get_life_os_root, write_ingest_note
 
@@ -34,14 +35,28 @@ def _write_token() -> str:
     return os.getenv("LIFE_OS_WRITE_TOKEN", "").strip()
 
 
-def require_write_token(authorization: Optional[str] = Header(default=None)) -> None:
+def require_write_token(request: Request,
+                        authorization: Optional[str] = Header(default=None)) -> None:
+    """Bearer-only gate for the write API, rate-limited (Phase 3 hardening).
+
+    Order is deliberate:
+      1. rate-limit check on FAILED-auth budget — refuses a brute-force burst
+         BEFORE the token compare (cheap, no timing surface, no file work);
+      2. token compare (constant-time); a miss burns the caller's fail budget;
+      3. successful-write budget — a leaked-but-valid token cannot flood.
+    Deliberately NOT session-cookie: this is state-changing, so cookie auth
+    would be CSRF-able (see app.require_token for the read-side contrast).
+    """
     tok = _write_token()
     if not tok:
         raise HTTPException(status_code=503,
                             detail="write API disabled (LIFE_OS_WRITE_TOKEN unset)")
+    key = enforce_pre_auth(request)                       # 429 if fail budget burned
     if not authorization or not hmac.compare_digest(authorization, f"Bearer {tok}"):
+        record_auth_failure(key)
         raise HTTPException(status_code=401, detail="missing or invalid write token",
                             headers={"WWW-Authenticate": "Bearer"})
+    enforce_write(key)                                    # 429 if write budget burned
 
 
 def _require_domain(domain: Optional[str]) -> None:
