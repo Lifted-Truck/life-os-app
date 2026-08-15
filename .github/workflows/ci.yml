@@ -22,7 +22,14 @@ jobs:
       - name: venv + deps (so tests run, not just the gates)
         run: |
           python -m venv venv
-          venv/bin/pip install -q -r requirements.txt pytest
+          # `mcp<2`: the MCP Python SDK went 2.0 with the 2026-07-28 spec
+          # revision and moved `mcp.server.fastmcp`; requirements.txt says
+          # `mcp>=1.0` so a fresh install gets 2.0 and mcp_server.py fails to
+          # import. Pinned HERE, not in requirements.txt — the migration to the
+          # 2.x import path is the resident's change (see integrations/
+          # autonomous/brief-1.md addendum), and CI should not silently decide
+          # a dependency ceiling for the app. Remove this pin when migrated.
+          venv/bin/pip install -r requirements.txt "mcp<2" pytest
       - name: ./verify fast
         run: |
           chmod +x verify

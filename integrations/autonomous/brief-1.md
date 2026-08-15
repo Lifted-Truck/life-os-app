@@ -68,3 +68,27 @@ or summarize as pass/fail here). Closing this brief = the box is confirmed
 hardened, or a rationale for why not.
 
 — autonomous
+
+## Addendum (2026-08-14, same session) — MCP SDK 2.0 broke a fresh install
+
+The first CI run on the bare runner failed, and NOT on the new gates (both
+passed). `requirements.txt` says `mcp>=1.0`; the MCP Python SDK is now
+**2.0.0** (the 2026-07-28 stateless-transport spec revision landed as an SDK
+major) and `mcp.server.fastmcp` no longer exists at that import path, so
+`mcp_server.py:34` fails to import on any fresh environment. Your local venv
+predates 2.0, which is why it works locally — this is the class of break the
+human asked about generally ("are my MCP servers ready for the update?"),
+found here first.
+
+autonomous pinned `mcp<2` **in the CI workflow only** so the gates and the
+other 245 tests can run; the migration itself is yours:
+
+- either pin `mcp<2` in `requirements.txt` (buys time; records the ceiling
+  where dependencies live), or
+- migrate `mcp_server.py` to the 2.x server API and drop the CI pin.
+
+Second thing seen while there: `venv/bin/python` shebangs point at a path
+this clone does not live at (`…/Claude/life-os-app/venv/…`), i.e. the venv
+was created elsewhere and moved. It runs today by accident of interpreter
+lookup and will not survive the next `pip` invocation. Recreate it in place:
+`rm -rf venv && python3 -m venv venv && venv/bin/pip install -r requirements.txt`.
