@@ -31,7 +31,16 @@ https://mindlathe.xyz/lathe/api/write.
 """
 from __future__ import annotations
 
-from mcp.server.fastmcp import FastMCP
+# MCP Python SDK 2.0.0 (the 2026-07-28 spec revision, shipped as a major)
+# removed `mcp.server.fastmcp`; the successor is `mcp.server.mcpserver.MCPServer`
+# with the SAME `.tool()` decorator and `.run()` (stdio default) that this file
+# uses. Import the 2.x class first and fall back to 1.x, so one file works on a
+# fresh install AND on the pre-2.0 venvs (local + VPS). Found by CI on a bare
+# runner — autonomous-lifeos-001 addendum; the pin `mcp<2` in CI is now dropped.
+try:
+    from mcp.server.mcpserver import MCPServer as FastMCP   # mcp >= 2.0
+except ImportError:                                            # mcp 1.x
+    from mcp.server.fastmcp import FastMCP
 
 from metrics.aggregate import all_domains_summary, domain_progress
 from scheduler.domains import list_domains as _list_domains

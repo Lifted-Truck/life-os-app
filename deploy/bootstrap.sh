@@ -102,13 +102,39 @@ sed -i \
     -e 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' \
     -e 's/^#\?ChallengeResponseAuthentication.*/ChallengeResponseAuthentication no/' \
     /etc/ssh/sshd_config
+# The sed above is NOT sufficient on its own. Ubuntu's sshd_config has
+# `Include /etc/ssh/sshd_config.d/*.conf` near the TOP, and OpenSSH applies
+# the FIRST value it sees for a keyword. Cloud images ship a drop-in
+# (e.g. 50-cloud-init.conf: `PasswordAuthentication yes`) that is included
+# before our edited lines and therefore silently overrides them. This is
+# exactly the drift found live on 2026-08-15 (autonomous-lifeos-001): the box
+# ran with password auth ON despite the sed. Fix: our own drop-in that sorts
+# FIRST (00-), so it wins over anything cloud-init adds later.
+install -d -m 755 /etc/ssh/sshd_config.d
+cat > /etc/ssh/sshd_config.d/00-life-os-hardening.conf <<'EOF'
+# Life-OS hardening — sorts first so it wins (OpenSSH: first value wins).
+# Managed by deploy/bootstrap.sh; do not hand-edit.
+PermitRootLogin no
+PasswordAuthentication no
+ChallengeResponseAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+EOF
+chmod 644 /etc/ssh/sshd_config.d/00-life-os-hardening.conf
+sshd -t   # validate before touching the running daemon
 systemctl reload ssh || systemctl reload sshd
+# Prove the effective config, not just the file — this is what the live check
+# in autonomous-lifeos-001 asked for and what actually matters.
+sshd -T | grep -E '^(permitrootlogin|passwordauthentication) ' | grep -q ' yes' \
+    && { echo "!! sshd hardening did NOT take effect"; exit 1; } || true
 
 echo "==> [7/7] Firewall (ufw) + fail2ban..."
 ufw --force reset
 ufw default deny incoming
 ufw default allow outgoing
-ufw allow 22/tcp
+# `limit` not `allow` on 22: rate-limits new connections (6/30s per source),
+# which blunts SSH brute-force alongside fail2ban. Applied live 2026-08-15.
+ufw limit 22/tcp
 ufw allow 80/tcp
 ufw allow 443/tcp
 ufw --force enable

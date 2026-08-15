@@ -33,8 +33,9 @@ contain no LLM calls. Skills / bot / API record and propose; the engine decides.
 - **Tests must be env-independent.** The deploy gate runs pytest *with the VPS
   `.env`* (which sets `LIFE_OS_HUB_PREFIX=/lathe`); assert against `A.HUB_PREFIX`,
   not literal paths, or the gate blocks the deploy.
-- **venv pip is broken** (stale shebang from a repo move) — use
-  `venv/bin/python -m pip`, never `venv/bin/pip`.
+- **MCP SDK: 1.x and 2.x both supported.** `mcp_server.py` imports the 2.x
+  `MCPServer` with a 1.x `FastMCP` fallback (SDK 2.0 removed
+  `mcp.server.fastmcp`). Keep that compat import; don't pin `mcp<2`.
 - **All data-tree writes go through `scheduler/fileio.py`** (atomic + advisory
   lock). Don't add raw `write_text`/`open("a")` on the data tree.
 - **Derived state** (`schedule/queue.yaml`, `today-state.yaml`) is **untracked**
